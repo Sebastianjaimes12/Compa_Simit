@@ -14,7 +14,6 @@ from openpyxl import Workbook
 from openpyxl.drawing.image import Image
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 import pyautogui
-
 import platform
 
 # Configuración para Railway (Linux)
@@ -259,7 +258,7 @@ class SimitScraper:
                 raise Exception("No se encontró chromedriver.exe")
             
             service = Service("chromedriver.exe")
-            options = Options()
+            options = configurar_chrome_para_railway()
             options.add_argument('--no-sandbox')
             options.add_argument('--disable-dev-shm-usage')
             options.add_argument('--disable-gpu')
@@ -926,5 +925,4 @@ DEF456</textarea>
 if __name__ == '__main__':
     print("🚀 Iniciando SIMIT Scraper...")
     print("📱 Abrir en: http://localhost:5000")
-
     app.run(debug=True, host='0.0.0.0', port=5000)
