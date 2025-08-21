@@ -15,6 +15,22 @@ from openpyxl.drawing.image import Image
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 import pyautogui
 
+import platform
+
+# Configuración para Railway (Linux)
+def configurar_chrome_para_railway():
+    options = Options()
+    
+    if platform.system() == "Linux":
+        options.add_argument('--headless')  # Sin interfaz gráfica
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('--disable-gpu')
+        options.add_argument('--remote-debugging-port=9222')
+        options.binary_location = "/usr/bin/google-chrome"  # Chrome en Railway
+    
+    return options
+
 app = Flask(__name__)
 
 # Variables globales para el progreso
@@ -910,4 +926,5 @@ DEF456</textarea>
 if __name__ == '__main__':
     print("🚀 Iniciando SIMIT Scraper...")
     print("📱 Abrir en: http://localhost:5000")
+
     app.run(debug=True, host='0.0.0.0', port=5000)
