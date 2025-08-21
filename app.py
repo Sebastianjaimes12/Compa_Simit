@@ -26,7 +26,16 @@ def configurar_chrome_para_railway():
         options.add_argument('--disable-dev-shm-usage')
         options.add_argument('--disable-gpu')
         options.add_argument('--remote-debugging-port=9222')
-        options.binary_location = "/usr/bin/google-chrome"  # Chrome en Railway
+        options.add_argument('--disable-extensions')
+        options.add_argument('--disable-plugins')
+        options.add_argument('--window-size=1920,1080')
+        # Railway tiene Chrome preinstalado
+        options.binary_location = "/usr/bin/google-chrome"
+    else:
+        # Para desarrollo local
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('--disable-gpu')
     
     return options
 
@@ -254,17 +263,15 @@ class SimitScraper:
             progreso_actual['estado'] = 'processing'
             self.actualizar_progreso("Iniciando proceso...", total=len(placas), procesadas=0)
             
-            if not os.path.exists("chromedriver.exe"):
-                raise Exception("No se encontró chromedriver.exe")
-            
-            service = Service("chromedriver.exe")
+            # Railway maneja Chrome automáticamente
+            service = Service()  # Sin especificar ruta de chromedriver
             options = configurar_chrome_para_railway()
-            options.add_argument('--no-sandbox')
-            options.add_argument('--disable-dev-shm-usage')
-            options.add_argument('--disable-gpu')
             
             self.driver = webdriver.Chrome(service=service, options=options)
-            self.driver.maximize_window()
+            
+            # Solo maximizar si no es headless
+            if platform.system() != "Linux":
+                self.driver.maximize_window()
             
             self.actualizar_progreso("Navegando a SIMIT...", total=len(placas), procesadas=0)
             self.driver.get("https://www.fcm.org.co/simit/#/home-public")
@@ -923,6 +930,5 @@ DEF456</textarea>
 '''
 
 if __name__ == '__main__':
-    print("🚀 Iniciando SIMIT Scraper...")
-    print("📱 Abrir en: http://localhost:5000")
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(debug=False, host='0.0.0.0', port=port)
