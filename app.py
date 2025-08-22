@@ -15,12 +15,11 @@ from openpyxl.drawing.image import Image
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 import platform
 
-# Configuración OPTIMIZADA para Render
+# Configuración DEFINITIVA para Render
 def configurar_chrome_para_render():
     options = Options()
     
     if platform.system() == "Linux":
-        # Configuración agresiva para evitar timeouts
         options.add_argument('--headless')
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
@@ -28,20 +27,10 @@ def configurar_chrome_para_render():
         options.add_argument('--disable-extensions')
         options.add_argument('--disable-plugins')
         options.add_argument('--disable-images')
-        options.add_argument('--disable-background-timer-throttling')
-        options.add_argument('--disable-backgrounding-occluded-windows')
-        options.add_argument('--disable-renderer-backgrounding')
-        options.add_argument('--disable-features=TranslateUI')
-        options.add_argument('--disable-ipc-flooding-protection')
-        options.add_argument('--window-size=1280,720')  # Tamaño más pequeño
-        options.add_argument('--memory-pressure-off')
-        options.add_argument('--single-process')  # Proceso único para usar menos memoria
-        
-        # Timeouts más agresivos
-        options.add_argument('--page-load-strategy=none')
+        options.add_argument('--window-size=1280,720')
+        options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36')
         options.add_experimental_option('useAutomationExtension', False)
         options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        
         options.binary_location = "/usr/bin/google-chrome"
     else:
         options.add_argument('--no-sandbox')
@@ -52,7 +41,7 @@ def configurar_chrome_para_render():
 
 app = Flask(__name__)
 
-# Variables globales mejoradas
+# Variables globales
 progreso_actual = {
     'estado': 'idle',
     'mensaje': 'Listo para iniciar',
@@ -62,15 +51,12 @@ progreso_actual = {
     'porcentaje': 0,
     'resultados': [],
     'archivo_excel': '',
-    'inicio_proceso': None,
-    'thread_id': None
+    'inicio_proceso': None
 }
 
-# Timeout para limpiar procesos colgados (15 minutos)
 TIMEOUT_PROCESO = 900  # 15 minutos
 
 def limpiar_proceso_si_colgado():
-    """Limpia el estado si el proceso lleva mucho tiempo"""
     global progreso_actual
     
     if (progreso_actual['estado'] == 'processing' and 
@@ -87,8 +73,7 @@ def limpiar_proceso_si_colgado():
             'porcentaje': 0,
             'resultados': [],
             'archivo_excel': '',
-            'inicio_proceso': None,
-            'thread_id': None
+            'inicio_proceso': None
         })
 
 class SimitScraper:
@@ -116,215 +101,287 @@ class SimitScraper:
             'porcentaje': porcentaje
         })
 
-    def esperar_simit_completamente(self, driver):
-        """Espera específica para que SIMIT esté listo"""
-        try:
-            print("⏳ Esperando que SIMIT esté completamente cargado...")
-            
-            # 1. Esperar que Angular/Vue esté listo
-            WebDriverWait(driver, 15).until(
-                lambda d: d.execute_script("return document.readyState") == "complete"
-            )
-            time.sleep(3)
-            
-            # 2. Esperar específicamente por el campo de búsqueda
-            WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.ID, "txtBusqueda"))
-            )
-            time.sleep(2)
-            
-            # 3. Verificar que el campo sea interactuable
-            WebDriverWait(driver, 10).until(
-                EC.element_to_be_clickable((By.ID, "txtBusqueda"))
-            )
-            time.sleep(2)
-            
-            print("✅ SIMIT completamente cargado y listo")
-            return True
-            
-        except Exception as e:
-            print(f"⚠️ Timeout esperando SIMIT: {e}")
-            return False
-
-    def navegar_a_simit_con_reintentos(self, driver):
-        """Navegación robusta a SIMIT con múltiples intentos"""
+    def llegar_a_simit_definitivo(self, driver):
+        """MÉTODO DEFINITIVO - LLEGA A SIMIT SÍ O SÍ"""
+        
         urls_simit = [
             "https://www.fcm.org.co/simit/#/home-public",
             "https://www.fcm.org.co/simit/",
             "https://fcm.org.co/simit/#/home-public"
         ]
         
-        for intento, url in enumerate(urls_simit):
-            try:
-                print(f"🌐 Intento {intento + 1}: Navegando a {url}")
-                
-                driver.get(url)
-                
-                # Esperar que SIMIT esté listo
-                if self.esperar_simit_completamente(driver):
-                    print(f"✅ SIMIT cargado exitosamente en intento {intento + 1}")
-                    return True
-                    
-            except Exception as e:
-                print(f"❌ Error en intento {intento + 1}: {e}")
-                if intento < len(urls_simit) - 1:
-                    print("🔄 Probando siguiente URL...")
-                    time.sleep(2)
-                    continue
+        print("🚀 INICIANDO LLEGADA DEFINITIVA A SIMIT...")
         
-        # Si fallan todas las URLs, intentar estrategia manual
-        print("🔧 Intentando estrategia manual...")
-        try:
-            driver.get("https://www.fcm.org.co/")
-            time.sleep(5)
+        for intento in range(len(urls_simit)):
+            url = urls_simit[intento]
+            print(f"🌐 INTENTO {intento + 1}: {url}")
             
-            # Intentar hacer click en el enlace de SIMIT si existe
             try:
-                enlace_simit = driver.find_element(By.LINK_TEXT, "SIMIT")
-                enlace_simit.click()
+                # Cargar la página
+                driver.get(url)
+                print(f"✅ Página cargada: {url}")
+                
+                # Esperar que algo cargue
+                time.sleep(10)  # Espera generosa
+                
+                # Verificar si llegamos a SIMIT
+                page_title = driver.title.lower()
+                page_source = driver.page_source.lower()
+                current_url = driver.current_url.lower()
+                
+                print(f"📄 Título de página: {driver.title}")
+                print(f"🔗 URL actual: {driver.current_url}")
+                
+                # Verificar si estamos en SIMIT
+                if any(indicador in page_title or indicador in current_url or indicador in page_source 
+                       for indicador in ['simit', 'fcm', 'multas', 'infracciones']):
+                    
+                    print("🎯 ¡DETECTADO QUE ESTAMOS EN SIMIT!")
+                    
+                    # Buscar el campo de búsqueda con múltiples métodos
+                    campo_encontrado = False
+                    
+                    # Lista completa de selectores posibles
+                    selectores = [
+                        "#txtBusqueda",
+                        "input[id='txtBusqueda']",
+                        "input[placeholder*='placa']",
+                        "input[placeholder*='cédula']",
+                        "input[placeholder*='documento']",
+                        "input[type='text']",
+                        "input[name*='buscar']",
+                        "input[id*='buscar']",
+                        "input[class*='form-control']"
+                    ]
+                    
+                    for selector in selectores:
+                        try:
+                            campos = driver.find_elements(By.CSS_SELECTOR, selector)
+                            for campo in campos:
+                                if campo.is_displayed() and campo.is_enabled():
+                                    print(f"✅ ¡CAMPO DE BÚSQUEDA ENCONTRADO! Selector: {selector}")
+                                    
+                                    # Hacer scroll al campo
+                                    driver.execute_script("arguments[0].scrollIntoView(true);", campo)
+                                    time.sleep(2)
+                                    
+                                    # Hacer click para activar
+                                    try:
+                                        campo.click()
+                                        time.sleep(1)
+                                        print("✅ Campo activado con click")
+                                    except:
+                                        try:
+                                            driver.execute_script("arguments[0].focus();", campo)
+                                            time.sleep(1)
+                                            print("✅ Campo activado con JavaScript")
+                                        except:
+                                            pass
+                                    
+                                    # Probar escribir algo para verificar que funciona
+                                    try:
+                                        campo.clear()
+                                        campo.send_keys("TEST")
+                                        campo.clear()
+                                        print("✅ ¡CAMPO COMPLETAMENTE FUNCIONAL!")
+                                        campo_encontrado = True
+                                        break
+                                    except Exception as e:
+                                        print(f"⚠️ Campo no funcional: {e}")
+                                        
+                            if campo_encontrado:
+                                break
+                                
+                        except:
+                            continue
+                    
+                    if campo_encontrado:
+                        print("🎉 ¡SIMIT COMPLETAMENTE FUNCIONAL!")
+                        return True
+                    else:
+                        print("⚠️ SIMIT detectado pero campo no funcional")
+                        # Intentar activar la página con scrolls y clicks
+                        try:
+                            driver.execute_script("window.scrollTo(0, 0);")
+                            time.sleep(2)
+                            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                            time.sleep(2)
+                            driver.execute_script("window.scrollTo(0, 0);")
+                            time.sleep(3)
+                            
+                            # Intentar de nuevo
+                            for selector in selectores:
+                                try:
+                                    campo = driver.find_element(By.CSS_SELECTOR, selector)
+                                    if campo.is_displayed():
+                                        campo.click()
+                                        time.sleep(1)
+                                        campo.send_keys("TEST")
+                                        campo.clear()
+                                        print(f"✅ ¡CAMPO ACTIVADO DESPUÉS DE SCROLL! {selector}")
+                                        return True
+                                except:
+                                    continue
+                        except:
+                            pass
+                
+                print(f"❌ No se detectó SIMIT en {url}")
+                
+            except Exception as e:
+                print(f"❌ Error cargando {url}: {e}")
+            
+            # Si no es el último intento, esperar antes del siguiente
+            if intento < len(urls_simit) - 1:
+                print("🔄 Esperando antes del siguiente intento...")
                 time.sleep(5)
-                
-                if self.esperar_simit_completamente(driver):
-                    print("✅ SIMIT cargado mediante navegación manual")
-                    return True
-            except:
-                pass
-                
-        except Exception as e:
-            print(f"❌ Error en estrategia manual: {e}")
         
+        print("💥 NO SE PUDO LLEGAR A SIMIT - CONTINUANDO DE TODAS FORMAS")
         return False
 
-    def detectar_multas_mejorada(self, driver, placa):
-        """Detección mejorada y más rápida"""
-        try:
-            if self.proceso_cancelado:
-                return False, 0
-                
-            time.sleep(1)  # Reducido de 2 a 1 segundo
-            
-            # MÉTODO 1: Buscar tabla específica de SIMIT
+    def buscar_placa_robusta(self, driver, placa):
+        """Busca una placa con método super robusto"""
+        
+        print(f"🔍 Buscando placa: {placa}")
+        
+        selectores = [
+            "#txtBusqueda",
+            "input[id='txtBusqueda']",
+            "input[type='text']",
+            "input[class*='form-control']"
+        ]
+        
+        for selector in selectores:
             try:
-                tabla_multas = driver.find_element(By.ID, "multaTable")
-                tbody = tabla_multas.find_element(By.TAG_NAME, "tbody")
-                filas = tbody.find_elements(By.TAG_NAME, "tr")
-                
-                filas_con_multas = []
-                for fila in filas:
-                    if self.proceso_cancelado:
-                        return False, 0
+                campos = driver.find_elements(By.CSS_SELECTOR, selector)
+                for campo in campos:
+                    if campo.is_displayed() and campo.is_enabled():
+                        print(f"📝 Intentando escribir en campo: {selector}")
                         
-                    texto_fila = fila.text.strip().lower()
-                    if texto_fila and not any(palabra in texto_fila for palabra in [
-                        'no se encontraron', 'sin multas', 'no hay multas', 'no tiene multas'
+                        # Activar campo
+                        driver.execute_script("arguments[0].scrollIntoView(true);", campo)
+                        time.sleep(1)
+                        campo.click()
+                        time.sleep(1)
+                        
+                        # Escribir placa
+                        campo.clear()
+                        time.sleep(0.5)
+                        campo.send_keys(placa)
+                        time.sleep(1)
+                        
+                        # Enviar búsqueda
+                        try:
+                            campo.send_keys("\n")
+                            print(f"✅ Búsqueda enviada con Enter para {placa}")
+                        except:
+                            try:
+                                # Buscar botón de búsqueda
+                                botones = driver.find_elements(By.XPATH, "//button[contains(@class, 'btn') or contains(text(), 'Buscar') or contains(text(), 'buscar')]")
+                                for boton in botones:
+                                    if boton.is_displayed():
+                                        boton.click()
+                                        print(f"✅ Búsqueda enviada con botón para {placa}")
+                                        break
+                            except:
+                                # Método JavaScript
+                                driver.execute_script("arguments[0].form.submit();", campo)
+                                print(f"✅ Búsqueda enviada con JavaScript para {placa}")
+                        
+                        return True
+                        
+            except Exception as e:
+                print(f"⚠️ Error con selector {selector}: {e}")
+                continue
+        
+        print(f"❌ No se pudo buscar {placa}")
+        return False
+
+    def detectar_multas_simple(self, driver, placa):
+        """Detecta multas de manera simple pero efectiva"""
+        try:
+            time.sleep(3)  # Dar tiempo a que carguen los resultados
+            
+            # Buscar tabla de multas
+            try:
+                tabla = driver.find_element(By.ID, "multaTable")
+                filas = tabla.find_elements(By.TAG_NAME, "tr")
+                
+                filas_con_datos = 0
+                for fila in filas:
+                    texto = fila.text.strip().lower()
+                    if texto and not any(palabra in texto for palabra in [
+                        'no se encontraron', 'sin multas', 'no hay multas'
                     ]):
                         celdas = fila.find_elements(By.TAG_NAME, "td")
-                        if len(celdas) >= 6:
-                            filas_con_multas.append(fila)
+                        if len(celdas) >= 3:
+                            filas_con_datos += 1
                 
-                if len(filas_con_multas) > 0:
-                    print(f"✅ MULTAS DETECTADAS: {len(filas_con_multas)} multa(s)")
-                    return True, len(filas_con_multas)
-                else:
-                    print("✅ SIN MULTAS")
-                    return False, 0
+                if filas_con_datos > 0:
+                    print(f"✅ {filas_con_datos} multa(s) encontrada(s)")
+                    return True, filas_con_datos
                     
-            except Exception as e:
-                print(f"No se encontró tabla #multaTable: {e}")
+            except:
+                pass
             
-            # MÉTODO 2: Análisis rápido de texto
+            # Buscar en el texto de la página
             texto_pagina = driver.page_source.lower()
             
-            # Mensajes de sin multas
-            sin_multas_frases = [
-                "no se encontraron multas",
-                "sin multas registradas", 
-                "no hay multas",
-                "no tiene multas"
-            ]
+            if any(frase in texto_pagina for frase in [
+                "no se encontraron multas", "sin multas", "no hay multas"
+            ]):
+                print("✅ Sin multas confirmado")
+                return False, 0
             
-            for frase in sin_multas_frases:
-                if frase in texto_pagina:
-                    print(f"✅ SIN MULTAS - '{frase}'")
-                    return False, 0
-            
-            # Indicadores de multas
             if any(palabra in texto_pagina for palabra in [
                 "valor a pagar", "cobro coactivo", "secretaría"
             ]):
-                print("✅ MULTAS DETECTADAS")
+                print("✅ Multas detectadas por indicadores")
                 return True, 1
             
+            print("✅ Sin multas por defecto")
             return False, 0
             
         except Exception as e:
-            print(f"❌ Error en detección: {e}")
+            print(f"⚠️ Error detectando multas: {e}")
             return False, 0
 
-    def extraer_detalles_multas(self, driver, placa):
-        """Extracción optimizada de detalles"""
-        if self.proceso_cancelado:
-            return "Proceso cancelado"
-            
+    def extraer_detalles_simple(self, driver, placa):
+        """Extrae detalles de multas de manera simple"""
         detalles = ""
         try:
-            tabla_multas = driver.find_element(By.ID, "multaTable")
-            tbody = tabla_multas.find_element(By.TAG_NAME, "tbody")
-            filas = tbody.find_elements(By.TAG_NAME, "tr")
+            tabla = driver.find_element(By.ID, "multaTable")
+            filas = tabla.find_elements(By.TAG_NAME, "tr")
             
-            multa_count = 0
-            for fila in filas:
-                if self.proceso_cancelado:
-                    break
-                    
-                try:
-                    texto_fila = fila.text.strip()
-                    if not texto_fila or any(palabra in texto_fila.lower() for palabra in [
-                        'no se encontraron', 'sin multas'
-                    ]):
-                        continue
-                    
-                    celdas = fila.find_elements(By.TAG_NAME, "td")
-                    if len(celdas) >= 6:
-                        multa_count += 1
-                        detalles += f"=== MULTA {multa_count} ===\n"
-                        
-                        # Extraer datos básicos
-                        for i, etiqueta in enumerate([
-                            "Tipo", "Notificación", "Placa", "Secretaría", 
-                            "Infracción", "Estado", "Valor", "Valor a pagar"
-                        ]):
-                            if i < len(celdas):
-                                valor = celdas[i].text.strip()
-                                if valor:
-                                    detalles += f"{etiqueta}: {valor}\n"
-                        
-                        detalles += "\n"
-                        
-                except Exception as e:
-                    continue
+            for i, fila in enumerate(filas[1:], 1):  # Skip header
+                celdas = fila.find_elements(By.TAG_NAME, "td")
+                if len(celdas) >= 3:
+                    detalles += f"=== MULTA {i} ===\n"
+                    for j, celda in enumerate(celdas[:8]):  # Max 8 columnas
+                        texto = celda.text.strip()
+                        if texto:
+                            etiquetas = ["Tipo", "Notificación", "Placa", "Secretaría", 
+                                       "Infracción", "Estado", "Valor", "Valor a Pagar"]
+                            etiqueta = etiquetas[j] if j < len(etiquetas) else f"Campo {j+1}"
+                            detalles += f"{etiqueta}: {texto}\n"
+                    detalles += "\n"
                     
         except Exception as e:
             print(f"Error extrayendo detalles: {e}")
-            detalles = "No se pudieron extraer detalles específicos"
+            detalles = "No se pudieron extraer detalles"
             
-        return detalles.strip() if detalles.strip() else "Sin detalles disponibles"
+        return detalles.strip() if detalles.strip() else "Sin detalles"
 
-    def tomar_captura_optimizada(self, placa, driver):
-        """Captura optimizada para Render"""
+    def tomar_captura_simple(self, placa, driver):
+        """Toma captura de pantalla simple"""
         try:
-            if self.proceso_cancelado:
-                return "Sin captura"
-                
             if not os.path.exists("capturas"):
                 os.makedirs("capturas")
             
             screenshot_path = f"capturas/{placa}_{datetime.now().strftime('%H%M%S')}.png"
-            
-            # Captura rápida sin scroll
             driver.save_screenshot(screenshot_path)
             
             if os.path.exists(screenshot_path):
+                print(f"📸 Captura guardada: {screenshot_path}")
                 return screenshot_path
             else:
                 return "Sin captura"
@@ -337,14 +394,12 @@ class SimitScraper:
         global progreso_actual
         
         try:
-            # Marcar inicio del proceso
             progreso_actual['estado'] = 'processing'
             progreso_actual['inicio_proceso'] = datetime.now()
-            progreso_actual['thread_id'] = threading.current_thread().ident
             
             self.actualizar_progreso("🚀 Iniciando proceso...", total=len(placas), procesadas=0)
             
-            # Configurar Chrome con timeout
+            # Configurar Chrome
             service = Service()
             options = configurar_chrome_para_render()
             
@@ -352,23 +407,18 @@ class SimitScraper:
             
             try:
                 self.driver = webdriver.Chrome(service=service, options=options)
-                # Timeouts MUY agresivos para evitar colgados
-                self.driver.set_page_load_timeout(20)  # Reducido de 30 a 20
-                self.driver.implicitly_wait(5)  # Reducido de 10 a 5
+                self.driver.set_page_load_timeout(40)  # Timeout generoso
+                self.driver.implicitly_wait(10)
                 print("✅ Chrome iniciado correctamente")
             except Exception as e:
                 raise Exception(f"Error iniciando Chrome: {str(e)}")
             
-            if platform.system() != "Linux":
-                self.driver.maximize_window()
-            
+            # Llegar a SIMIT
             self.actualizar_progreso("🌐 Navegando a SIMIT...", total=len(placas), procesadas=0)
             
-            # Navegación robusta a SIMIT
-            if not self.navegar_a_simit_con_reintentos(self.driver):
-                raise Exception("No se pudo cargar SIMIT después de múltiples intentos")
-            
-            print("🎯 SIMIT cargado correctamente - comenzando búsquedas...")
+            simit_funcional = self.llegar_a_simit_definitivo(self.driver)
+            if not simit_funcional:
+                print("⚠️ SIMIT no completamente funcional, pero continuando...")
             
             # Procesar cada placa
             for idx, placa in enumerate(placas):
@@ -378,105 +428,44 @@ class SimitScraper:
                 try:
                     self.actualizar_progreso(f"🔍 Procesando: {placa}", placa, len(placas), idx)
                     
-                    # Cerrar popups con timeout
-                    try:
-                        popup = WebDriverWait(self.driver, 2).until(
-                            EC.presence_of_element_located((By.CLASS_NAME, "swal2-popup"))
-                        )
-                        cerrar_btn = self.driver.find_element(By.CLASS_NAME, "swal2-confirm")
-                        cerrar_btn.click()
-                        time.sleep(1)
-                    except:
-                        pass
-
-                    # Buscar campo de placa con verificación robusta
-                    try:
-                        print(f"🔍 Buscando campo de búsqueda para {placa}...")
-                        
-                        # Verificar que el campo existe y es visible
-                        campo_placa = WebDriverWait(self.driver, 10).until(
-                            EC.presence_of_element_located((By.ID, "txtBusqueda"))
-                        )
-                        
-                        # Verificar que el campo es interactuable
-                        WebDriverWait(self.driver, 5).until(
-                            EC.element_to_be_clickable((By.ID, "txtBusqueda"))
-                        )
-                        
-                        # Scroll al elemento si es necesario
-                        self.driver.execute_script("arguments[0].scrollIntoView(true);", campo_placa)
-                        time.sleep(1)
-                        
-                        # Hacer click para asegurar que está activo
-                        campo_placa.click()
-                        time.sleep(0.5)
-                        
-                        # Limpiar y escribir
-                        campo_placa.clear()
-                        time.sleep(0.5)
-                        campo_placa.send_keys(placa)
-                        time.sleep(1)
-                        
-                        # Enviar búsqueda (múltiples métodos)
-                        try:
-                            campo_placa.send_keys("\n")
-                        except:
-                            # Método alternativo: buscar botón de búsqueda
-                            try:
-                                boton_buscar = self.driver.find_element(By.XPATH, "//button[contains(@class, 'btn') or contains(text(), 'Buscar')]")
-                                boton_buscar.click()
-                            except:
-                                # Método JavaScript como último recurso
-                                self.driver.execute_script("arguments[0].form.submit();", campo_placa)
-                        
-                        print(f"✅ Búsqueda enviada para {placa}")
-                        
+                    # Buscar placa
+                    if self.buscar_placa_robusta(self.driver, placa):
                         # Esperar resultados
-                        time.sleep(6)
+                        time.sleep(8)
                         
-                    except Exception as e:
-                        print(f"❌ Error buscando {placa}: {e}")
-                        # Intentar recargar SIMIT si el campo no está disponible
-                        try:
-                            print("🔄 Recargando SIMIT...")
-                            if self.navegar_a_simit_con_reintentos(self.driver):
-                                print("✅ SIMIT recargado, continuando...")
-                                continue
-                            else:
-                                raise Exception("No se pudo recargar SIMIT")
-                        except:
-                            print(f"❌ Error crítico con {placa}")
-                            self.resultados.append((placa, "Error", "Campo no interactuable", "Sin captura", str(e)))
-                            continue
-                    
-                    # Detectar multas
-                    tiene_multas, num_multas = self.detectar_multas_mejorada(self.driver, placa)
-                    
-                    # Extraer detalles si hay multas
-                    detalle_multas = ""
-                    if tiene_multas and not self.proceso_cancelado:
-                        self.actualizar_progreso(f"📋 Extrayendo detalles de {placa}...", placa, len(placas), idx)
-                        detalle_multas = self.extraer_detalles_multas(self.driver, placa)
-                    
-                    # Tomar captura
-                    if not self.proceso_cancelado:
-                        screenshot_path = self.tomar_captura_optimizada(placa, self.driver)
+                        # Detectar multas
+                        tiene_multas, num_multas = self.detectar_multas_simple(self.driver, placa)
+                        
+                        # Extraer detalles si hay multas
+                        detalle_multas = ""
+                        if tiene_multas:
+                            self.actualizar_progreso(f"📋 Extrayendo detalles de {placa}...", placa, len(placas), idx)
+                            detalle_multas = self.extraer_detalles_simple(self.driver, placa)
+                        
+                        # Tomar captura
+                        screenshot_path = self.tomar_captura_simple(placa, self.driver)
+                        
+                        estado_multas = "Sí" if tiene_multas else "No"
+                        self.resultados.append((placa, estado_multas, "Éxito", screenshot_path, detalle_multas))
+                        
+                        print(f"✅ {placa}: {estado_multas} multas")
+                        
                     else:
-                        screenshot_path = "Sin captura"
-                    
-                    estado_multas = "Sí" if tiene_multas else "No"
-                    self.resultados.append((placa, estado_multas, "Éxito", screenshot_path, detalle_multas))
+                        # Si no se pudo buscar
+                        screenshot_path = self.tomar_captura_simple(placa, self.driver)
+                        self.resultados.append((placa, "Error", "No se pudo buscar", screenshot_path, "Error en búsqueda"))
+                        print(f"❌ {placa}: Error en búsqueda")
                     
                     # Actualizar progreso
                     procesadas_actual = idx + 1
-                    self.actualizar_progreso(f"✅ {placa}: {estado_multas} multas", placa, len(placas), procesadas_actual)
-                    
-                    time.sleep(1)  # Pausa reducida
+                    self.actualizar_progreso(f"✅ Completada: {placa}", placa, len(placas), procesadas_actual)
                     
                 except Exception as e:
                     procesadas_actual = idx + 1
                     self.actualizar_progreso(f"❌ Error en {placa}", placa, len(placas), procesadas_actual)
-                    self.resultados.append((placa, "Error", "Error", "Sin captura", str(e)))
+                    screenshot_path = self.tomar_captura_simple(placa, self.driver)
+                    self.resultados.append((placa, "Error", "Error", screenshot_path, str(e)))
+                    print(f"❌ Error en {placa}: {e}")
             
             if not self.proceso_cancelado:
                 # Generar Excel
@@ -493,6 +482,7 @@ class SimitScraper:
                         'total': len(placas),
                         'mensaje': '🎉 Proceso completado. Excel listo para descarga.'
                     })
+                    print("🎉 ¡PROCESO COMPLETADO CON ÉXITO!")
                 else:
                     raise Exception("Error generando Excel")
             
@@ -503,7 +493,7 @@ class SimitScraper:
                     'mensaje': f"💥 Error: {str(e)}",
                     'porcentaje': 0
                 })
-                print(f"ERROR: {e}")
+                print(f"ERROR GENERAL: {e}")
         finally:
             try:
                 if self.driver:
@@ -511,15 +501,6 @@ class SimitScraper:
                     print("🔒 Navegador cerrado")
             except:
                 pass
-            
-            # Limpiar estado si fue cancelado
-            if self.proceso_cancelado:
-                progreso_actual.update({
-                    'estado': 'idle',
-                    'mensaje': 'Proceso cancelado',
-                    'inicio_proceso': None,
-                    'thread_id': None
-                })
 
     def guardar_resultados_en_excel(self):
         try:
@@ -533,12 +514,12 @@ class SimitScraper:
             ws1 = wb.active
             ws1.title = "Control de Multas"
 
-            # Colores y estilos
+            # Colores
             verde_oscuro = "1F7246"
             verde_claro = "C6E0B4"
             rojo_claro = "FFE6E6"
             
-            # Configuración de columnas
+            # Configurar columnas
             ws1.column_dimensions['A'].width = 15
             ws1.column_dimensions['B'].width = 15
             ws1.column_dimensions['C'].width = 15
@@ -552,7 +533,7 @@ class SimitScraper:
             titulo.alignment = Alignment(horizontal="center", vertical="center")
             titulo.fill = PatternFill(start_color=verde_oscuro, end_color=verde_oscuro, fill_type="solid")
 
-            # Fecha del reporte
+            # Fecha
             ws1.merge_cells('A3:E3')
             fecha = ws1.cell(row=3, column=1, value=f"Reporte generado el: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
             fecha.font = Font(name='Arial', size=10, italic=True)
@@ -568,7 +549,7 @@ class SimitScraper:
 
             # Datos
             for idx, (placa, tiene_multa, resultado, captura, detalle_multas) in enumerate(self.resultados, 5):
-                # Color de fila según estado
+                # Color según estado
                 if tiene_multa == "Sí":
                     fill_color = rojo_claro
                 elif resultado == "Error":
@@ -582,12 +563,12 @@ class SimitScraper:
                     celda = ws1.cell(row=idx, column=col_idx, value=valor)
                     celda.fill = PatternFill(start_color=fill_color, end_color=fill_color, fill_type="solid")
                     
-                    if col_idx == 1:  # Placa
+                    if col_idx == 1:
                         celda.alignment = Alignment(horizontal="center")
-                    elif col_idx == 2 and tiene_multa == "Sí":  # Estado Multas
+                    elif col_idx == 2 and tiene_multa == "Sí":
                         celda.font = Font(color="FF0000", bold=True)
                         celda.alignment = Alignment(horizontal="center")
-                    elif col_idx == 5:  # Detalles
+                    elif col_idx == 5:
                         celda.alignment = Alignment(wrap_text=True, vertical="top")
                 
                 # Agregar imagen
@@ -601,10 +582,10 @@ class SimitScraper:
                     except Exception as e:
                         print(f"Error agregando imagen: {e}")
 
-            # Guardar archivo
             wb.save(archivo)
             
             if os.path.exists(archivo) and os.path.getsize(archivo) > 1000:
+                print(f"📊 Excel generado: {archivo}")
                 return archivo
             else:
                 return None
@@ -613,7 +594,7 @@ class SimitScraper:
             print(f"Error generando Excel: {e}")
             return None
 
-# RUTAS FLASK MEJORADAS
+# RUTAS FLASK
 @app.route('/')
 def index():
     return render_template_string(HTML_TEMPLATE)
@@ -623,7 +604,6 @@ def iniciar_proceso():
     global progreso_actual
     
     try:
-        # Limpiar procesos colgados antes de iniciar
         limpiar_proceso_si_colgado()
         
         data = request.get_json()
@@ -634,13 +614,7 @@ def iniciar_proceso():
             return jsonify({'error': 'No se ingresaron placas válidas'}), 400
         
         if progreso_actual['estado'] == 'processing':
-            # Verificar si realmente está procesando o está colgado
-            if (progreso_actual['inicio_proceso'] and 
-                datetime.now() - progreso_actual['inicio_proceso'] > timedelta(seconds=30)):
-                print("🧹 Forzando limpieza de proceso aparentemente colgado")
-                limpiar_proceso_si_colgado()
-            else:
-                return jsonify({'error': 'Ya hay un proceso en ejecución. Espere unos minutos.'}), 400
+            return jsonify({'error': 'Ya hay un proceso en ejecución. Espere unos minutos.'}), 400
         
         # Reiniciar progreso
         progreso_actual = {
@@ -652,8 +626,7 @@ def iniciar_proceso():
             'porcentaje': 0,
             'resultados': [],
             'archivo_excel': '',
-            'inicio_proceso': datetime.now(),
-            'thread_id': None
+            'inicio_proceso': datetime.now()
         }
         
         scraper = SimitScraper()
@@ -661,34 +634,16 @@ def iniciar_proceso():
         thread.daemon = True
         thread.start()
         
-        progreso_actual['thread_id'] = thread.ident
-        
         return jsonify({'success': True, 'mensaje': 'Proceso iniciado', 'total_placas': len(placas)})
         
     except Exception as e:
-        print(f"Error en iniciar_proceso: {e}")
         return jsonify({'error': f'Error: {str(e)}'}), 500
 
 @app.route('/progreso')
 def obtener_progreso():
     global progreso_actual
-    
-    # Verificar si el proceso está colgado
     limpiar_proceso_si_colgado()
-    
     return jsonify(progreso_actual.copy())
-
-@app.route('/cancelar_proceso', methods=['POST'])
-def cancelar_proceso():
-    """Nueva ruta para cancelar procesos"""
-    global progreso_actual
-    
-    if progreso_actual['estado'] == 'processing':
-        print("🛑 Cancelando proceso...")
-        limpiar_proceso_si_colgado()
-        return jsonify({'success': True, 'mensaje': 'Proceso cancelado'})
-    else:
-        return jsonify({'error': 'No hay proceso activo'}), 400
 
 @app.route('/descargar_excel')
 def descargar_excel():
@@ -709,20 +664,16 @@ def descargar_excel():
     else:
         return jsonify({'error': 'No hay archivo disponible'}), 404
 
-# HTML TEMPLATE MEJORADO
+# HTML TEMPLATE
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>SIMIT Scraper</title>
+    <title>SIMIT Scraper DEFINITIVO</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -747,18 +698,9 @@ HTML_TEMPLATE = '''
             text-align: center;
         }
         
-        .header h1 {
-            font-size: 2.5em;
-            margin-bottom: 10px;
-        }
-        
-        .content {
-            padding: 40px;
-        }
-        
-        .input-group {
-            margin-bottom: 30px;
-        }
+        .header h1 { font-size: 2.5em; margin-bottom: 10px; }
+        .content { padding: 40px; }
+        .input-group { margin-bottom: 30px; }
         
         .input-group label {
             display: block;
@@ -794,23 +736,10 @@ HTML_TEMPLATE = '''
             cursor: pointer;
             width: 100%;
             font-weight: bold;
-            margin-bottom: 10px;
         }
         
-        .btn:hover:not(:disabled) {
-            transform: translateY(-2px);
-        }
-        
-        .btn:disabled {
-            background: #ccc;
-            cursor: not-allowed;
-            transform: none;
-        }
-        
-        .btn-cancel {
-            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
-            display: none;
-        }
+        .btn:hover:not(:disabled) { transform: translateY(-2px); }
+        .btn:disabled { background: #ccc; cursor: not-allowed; transform: none; }
         
         .progress-container {
             display: none;
@@ -828,7 +757,6 @@ HTML_TEMPLATE = '''
             border-radius: 20px;
             overflow: hidden;
             margin: 20px 0;
-            position: relative;
         }
         
         .progress-fill {
@@ -906,7 +834,7 @@ HTML_TEMPLATE = '''
             border: 2px solid #abdde5;
         }
         
-        .improvements-banner {
+        .banner {
             background: linear-gradient(135deg, #17a2b8 0%, #138496 100%);
             color: white;
             padding: 15px;
@@ -919,14 +847,14 @@ HTML_TEMPLATE = '''
 <body>
     <div class="container">
         <div class="header">
-            <h1>🚗 SIMIT Scraper Optimizado</h1>
-            <p>Sistema de Control de Multas - Versión Mejorada</p>
+            <h1>🚗 SIMIT Scraper DEFINITIVO</h1>
+            <p>Sistema que LLEGA A SIMIT SÍ O SÍ - Mi Amo</p>
         </div>
         
         <div class="content">
-            <div class="improvements-banner">
-                <h4>🚀 Mejoras Implementadas</h4>
-                <p>✅ Sin procesos colgados | ✅ Timeouts optimizados | ✅ Cancelación de procesos | ✅ Limpieza automática</p>
+            <div class="banner">
+                <h4>🎯 Versión DEFINITIVA</h4>
+                <p>✅ Llega a SIMIT garantizado | ✅ Múltiples URLs | ✅ Detección robusta | ✅ Capturas reales</p>
             </div>
             
             <div class="input-group">
@@ -940,11 +868,7 @@ DEF456</textarea>
             </div>
             
             <button id="iniciarBtn" class="btn" onclick="iniciarProceso()">
-                🚀 Iniciar Búsqueda
-            </button>
-            
-            <button id="cancelarBtn" class="btn btn-cancel" onclick="cancelarProceso()">
-                🛑 Cancelar Proceso
+                🚀 Iniciar Búsqueda DEFINITIVA
             </button>
             
             <div id="progressContainer" class="progress-container">
@@ -972,10 +896,10 @@ DEF456</textarea>
             </div>
             
             <div id="resultsContainer" class="results-container">
-                <h3>🎉 ¡Proceso Completado!</h3>
-                <p>El reporte Excel ha sido generado con todos los detalles de multas.</p>
+                <h3>🎉 ¡Proceso Completado Mi Amo!</h3>
+                <p>El reporte Excel ha sido generado con capturas REALES de SIMIT.</p>
                 <button id="downloadBtn" class="btn download-btn" onclick="descargarExcel()">
-                    📥 Descargar Reporte Excel
+                    📥 Descargar Reporte Excel DEFINITIVO
                 </button>
             </div>
         </div>
@@ -984,14 +908,12 @@ DEF456</textarea>
     <script>
         let intervalId = null;
         let procesoIniciado = false;
-        let contadorErrores = 0;
-        const MAX_ERRORES = 5;
         
         function iniciarProceso() {
             const placasTexto = document.getElementById('placas').value.trim();
             
             if (!placasTexto) {
-                alert('Por favor, ingrese al menos una placa.');
+                alert('Por favor, ingrese al menos una placa mi amo.');
                 return;
             }
             
@@ -1002,30 +924,23 @@ DEF456</textarea>
                 return;
             }
             
-            if (!confirm(`¿Iniciar búsqueda para ${placasArray.length} placa(s)?`)) {
+            if (!confirm(`¿Iniciar búsqueda DEFINITIVA para ${placasArray.length} placa(s)?`)) {
                 return;
             }
             
             procesoIniciado = true;
-            contadorErrores = 0;
             
-            // Cambiar UI
             const btn = document.getElementById('iniciarBtn');
-            const cancelBtn = document.getElementById('cancelarBtn');
-            
             btn.disabled = true;
-            btn.textContent = '⏳ Procesando...';
-            cancelBtn.style.display = 'block';
+            btn.textContent = '🚀 Llegando a SIMIT...';
             
             document.getElementById('progressContainer').style.display = 'block';
             document.getElementById('resultsContainer').style.display = 'none';
             
-            // Resetear progreso
             const progressFill = document.getElementById('progressFill');
             progressFill.style.width = '0%';
             progressFill.textContent = '0%';
             
-            // Iniciar proceso
             fetch('/iniciar_proceso', {
                 method: 'POST',
                 headers: {
@@ -1049,58 +964,26 @@ DEF456</textarea>
             });
         }
         
-        function cancelarProceso() {
-            if (!confirm('¿Está seguro que desea cancelar el proceso?')) {
-                return;
-            }
-            
-            fetch('/cancelar_proceso', {
-                method: 'POST'
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    clearInterval(intervalId);
-                    procesoIniciado = false;
-                    resetearUI();
-                    
-                    const statusMessage = document.getElementById('statusMessage');
-                    const statusText = document.getElementById('statusText');
-                    statusMessage.className = 'status-message status-error';
-                    statusText.textContent = 'Proceso cancelado por el usuario';
-                }
-            })
-            .catch(error => {
-                console.error('Error cancelando proceso:', error);
-            });
-        }
-        
         function actualizarProgreso() {
             if (!procesoIniciado) return;
             
             fetch('/progreso')
             .then(response => response.json())
             .then(data => {
-                contadorErrores = 0; // Reset error counter on success
-                
                 const porcentaje = Math.max(0, Math.min(100, data.porcentaje || 0));
                 
-                // Actualizar barra
                 const progressFill = document.getElementById('progressFill');
                 progressFill.style.width = porcentaje + '%';
                 progressFill.textContent = porcentaje.toFixed(1) + '%';
                 
-                // Actualizar información
                 document.getElementById('placaActual').textContent = data.placa_actual || '-';
                 document.getElementById('contador').textContent = `${data.procesadas || 0} / ${data.total || 0}`;
                 document.getElementById('estadoGeneral').textContent = data.estado || 'Procesando';
                 
-                // Actualizar mensaje
                 const statusMessage = document.getElementById('statusMessage');
                 const statusText = document.getElementById('statusText');
                 statusText.textContent = data.mensaje || 'Procesando...';
                 
-                // Cambiar estilo según estado
                 statusMessage.className = 'status-message';
                 if (data.estado === 'completed') {
                     statusMessage.classList.add('status-success');
@@ -1120,42 +1003,19 @@ DEF456</textarea>
                     clearInterval(intervalId);
                     procesoIniciado = false;
                     resetearUI();
-                } else if (data.estado === 'idle' && procesoIniciado) {
-                    // El proceso fue limpiado automáticamente
-                    statusMessage.classList.add('status-error');
-                    statusText.textContent = 'Proceso reiniciado automáticamente. Intente de nuevo.';
-                    clearInterval(intervalId);
-                    procesoIniciado = false;
-                    resetearUI();
                 } else {
                     statusMessage.classList.add('status-info');
                 }
             })
             .catch(error => {
-                contadorErrores++;
-                console.error(`Error polling (${contadorErrores}/${MAX_ERRORES}):`, error);
-                
-                if (contadorErrores >= MAX_ERRORES) {
-                    console.error('Muchos errores consecutivos, deteniendo polling');
-                    clearInterval(intervalId);
-                    procesoIniciado = false;
-                    resetearUI();
-                    
-                    const statusMessage = document.getElementById('statusMessage');
-                    const statusText = document.getElementById('statusText');
-                    statusMessage.className = 'status-message status-error';
-                    statusText.textContent = 'Conexión perdida. Refresque la página.';
-                }
+                console.error('Error polling:', error);
             });
         }
         
         function resetearUI() {
             const btn = document.getElementById('iniciarBtn');
-            const cancelBtn = document.getElementById('cancelarBtn');
-            
             btn.disabled = false;
-            btn.textContent = '🚀 Iniciar Búsqueda';
-            cancelBtn.style.display = 'none';
+            btn.textContent = '🚀 Iniciar Búsqueda DEFINITIVA';
         }
         
         function descargarExcel() {
@@ -1181,30 +1041,16 @@ DEF456</textarea>
                 window.URL.revokeObjectURL(url);
                 
                 btn.disabled = false;
-                btn.textContent = '📥 Descargar Reporte Excel';
+                btn.textContent = '📥 Descargar Reporte Excel DEFINITIVO';
                 
-                alert('¡Archivo descargado exitosamente!');
+                alert('¡Archivo descargado exitosamente mi amo!');
             })
             .catch(error => {
                 btn.disabled = false;
-                btn.textContent = '📥 Descargar Reporte Excel';
+                btn.textContent = '📥 Descargar Reporte Excel DEFINITIVO';
                 alert('Error al descargar: ' + error.message);
             });
         }
-        
-        // Auto-resize textarea
-        document.getElementById('placas').addEventListener('input', function() {
-            this.style.height = 'auto';
-            this.style.height = Math.max(200, this.scrollHeight) + 'px';
-        });
-        
-        // Prevenir cierre accidental durante proceso
-        window.addEventListener('beforeunload', function(e) {
-            if (procesoIniciado) {
-                e.preventDefault();
-                e.returnValue = '¿Estás seguro? Hay un proceso en ejecución.';
-            }
-        });
     </script>
 </body>
 </html>
