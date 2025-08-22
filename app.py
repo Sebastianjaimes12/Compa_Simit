@@ -9,18 +9,18 @@ import os
 import time
 import json
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from openpyxl import Workbook
 from openpyxl.drawing.image import Image
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 import platform
 
-# Configuración para Railway (Linux)
-def configurar_chrome_para_railway():
+# Configuración para Render (Linux)
+def configurar_chrome_para_render():
     options = Options()
     
     if platform.system() == "Linux":
-        options.add_argument('--headless')  # Sin interfaz gráfica
+        options.add_argument('--headless')
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
         options.add_argument('--disable-gpu')
@@ -28,10 +28,10 @@ def configurar_chrome_para_railway():
         options.add_argument('--disable-extensions')
         options.add_argument('--disable-plugins')
         options.add_argument('--window-size=1920,1080')
-        # Railway tiene Chrome preinstalado
+        options.add_argument('--disable-images')  # Cargar más rápido
+        options.add_argument('--disable-javascript')  # Solo para scraping básico
         options.binary_location = "/usr/bin/google-chrome"
     else:
-        # Para desarrollo local
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
         options.add_argument('--disable-gpu')
@@ -40,7 +40,7 @@ def configurar_chrome_para_railway():
 
 app = Flask(__name__)
 
-# Variables globales para el progreso
+# Variables globales mejoradas
 progreso_actual = {
     'estado': 'idle',
     'mensaje': 'Listo para iniciar',
@@ -49,16 +49,47 @@ progreso_actual = {
     'procesadas': 0,
     'porcentaje': 0,
     'resultados': [],
-    'archivo_excel': ''
+    'archivo_excel': '',
+    'inicio_proceso': None,
+    'thread_id': None
 }
+
+# Timeout para limpiar procesos colgados (15 minutos)
+TIMEOUT_PROCESO = 900  # 15 minutos
+
+def limpiar_proceso_si_colgado():
+    """Limpia el estado si el proceso lleva mucho tiempo"""
+    global progreso_actual
+    
+    if (progreso_actual['estado'] == 'processing' and 
+        progreso_actual['inicio_proceso'] and
+        datetime.now() - progreso_actual['inicio_proceso'] > timedelta(seconds=TIMEOUT_PROCESO)):
+        
+        print("🧹 Limpiando proceso colgado...")
+        progreso_actual.update({
+            'estado': 'idle',
+            'mensaje': 'Proceso anterior cancelado por timeout',
+            'placa_actual': '',
+            'total': 0,
+            'procesadas': 0,
+            'porcentaje': 0,
+            'resultados': [],
+            'archivo_excel': '',
+            'inicio_proceso': None,
+            'thread_id': None
+        })
 
 class SimitScraper:
     def __init__(self):
         self.resultados = []
         self.driver = None
+        self.proceso_cancelado = False
     
     def actualizar_progreso(self, mensaje, placa_actual='', total=0, procesadas=0):
         global progreso_actual
+        
+        if self.proceso_cancelado:
+            return
         
         porcentaje = 0
         if total > 0:
@@ -73,93 +104,80 @@ class SimitScraper:
             'porcentaje': porcentaje
         })
 
-    def esperar_carga_simple(self, driver):
-        """Espera simplificada para carga de página"""
+    def esperar_carga_optimizada(self, driver):
+        """Espera optimizada para Render"""
         try:
-            WebDriverWait(driver, 20).until(
+            # Espera más corta para evitar timeouts
+            WebDriverWait(driver, 15).until(
                 lambda d: d.execute_script("return document.readyState") == "complete"
             )
-            time.sleep(5)  # Espera fija para que cargue todo
+            time.sleep(3)  # Reducido de 5 a 3 segundos
             return True
-        except:
-            time.sleep(5)
+        except Exception as e:
+            print(f"⚠️ Timeout en espera de carga: {e}")
+            time.sleep(3)
             return True
 
     def detectar_multas_mejorada(self, driver, placa):
-        """Detección CORREGIDA de multas usando los selectores reales de SIMIT"""
+        """Detección mejorada y más rápida"""
         try:
-            time.sleep(2)
+            if self.proceso_cancelado:
+                return False, 0
+                
+            time.sleep(1)  # Reducido de 2 a 1 segundo
             
             # MÉTODO 1: Buscar tabla específica de SIMIT
             try:
-                # Buscar por el ID exacto de la tabla de multas
                 tabla_multas = driver.find_element(By.ID, "multaTable")
                 tbody = tabla_multas.find_element(By.TAG_NAME, "tbody")
                 filas = tbody.find_elements(By.TAG_NAME, "tr")
                 
-                # Filtrar filas que no son de "sin resultados"
                 filas_con_multas = []
                 for fila in filas:
+                    if self.proceso_cancelado:
+                        return False, 0
+                        
                     texto_fila = fila.text.strip().lower()
-                    # Si la fila tiene datos reales de multa (no mensajes de "sin resultados")
                     if texto_fila and not any(palabra in texto_fila for palabra in [
                         'no se encontraron', 'sin multas', 'no hay multas', 'no tiene multas'
                     ]):
-                        # Verificar que tiene celdas con datos reales
                         celdas = fila.find_elements(By.TAG_NAME, "td")
-                        if len(celdas) >= 6:  # Una multa real debe tener al menos 6 columnas
+                        if len(celdas) >= 6:
                             filas_con_multas.append(fila)
                 
                 if len(filas_con_multas) > 0:
-                    print(f"✅ MULTAS DETECTADAS: {len(filas_con_multas)} multa(s) en tabla")
+                    print(f"✅ MULTAS DETECTADAS: {len(filas_con_multas)} multa(s)")
                     return True, len(filas_con_multas)
                 else:
-                    print("✅ TABLA ENCONTRADA pero SIN MULTAS")
+                    print("✅ SIN MULTAS")
                     return False, 0
                     
             except Exception as e:
                 print(f"No se encontró tabla #multaTable: {e}")
             
-            # MÉTODO 2: Buscar mensaje específico de "sin multas"
-            try:
-                # Buscar elementos que indiquen que no hay multas
-                sin_multas_elementos = driver.find_elements(By.XPATH, 
-                    "//*[contains(text(), 'No se encontraron') or contains(text(), 'sin multas') or contains(text(), 'No hay multas')]")
-                
-                if len(sin_multas_elementos) > 0:
-                    print("✅ SIN MULTAS - Mensaje encontrado")
-                    return False, 0
-                    
-            except:
-                pass
-            
-            # MÉTODO 3: Analizar texto general de la página
+            # MÉTODO 2: Análisis rápido de texto
             texto_pagina = driver.page_source.lower()
             
-            # Mensajes específicos que indican NO hay multas
+            # Mensajes de sin multas
             sin_multas_frases = [
                 "no se encontraron multas",
                 "sin multas registradas", 
                 "no hay multas",
-                "no tiene multas",
-                "sin infracciones",
-                "no se encontraron infracciones"
+                "no tiene multas"
             ]
             
             for frase in sin_multas_frases:
                 if frase in texto_pagina:
-                    print(f"✅ SIN MULTAS - Frase encontrada: '{frase}'")
+                    print(f"✅ SIN MULTAS - '{frase}'")
                     return False, 0
             
-            # MÉTODO 4: Buscar indicadores positivos de multas
+            # Indicadores de multas
             if any(palabra in texto_pagina for palabra in [
-                "valor a pagar", "cobro coactivo", "secretaría", "infracción"
+                "valor a pagar", "cobro coactivo", "secretaría"
             ]):
-                print("✅ POSIBLES MULTAS - Indicadores encontrados")
+                print("✅ MULTAS DETECTADAS")
                 return True, 1
             
-            # Por defecto, asumir que no hay multas
-            print("✅ SIN MULTAS - No se encontraron indicadores")
             return False, 0
             
         except Exception as e:
@@ -167,16 +185,21 @@ class SimitScraper:
             return False, 0
 
     def extraer_detalles_multas(self, driver, placa):
-        """Extracción CORREGIDA de detalles usando la estructura real de SIMIT"""
+        """Extracción optimizada de detalles"""
+        if self.proceso_cancelado:
+            return "Proceso cancelado"
+            
         detalles = ""
         try:
-            # Buscar la tabla específica de multas
             tabla_multas = driver.find_element(By.ID, "multaTable")
             tbody = tabla_multas.find_element(By.TAG_NAME, "tbody")
             filas = tbody.find_elements(By.TAG_NAME, "tr")
             
             multa_count = 0
             for fila in filas:
+                if self.proceso_cancelado:
+                    break
+                    
                 try:
                     texto_fila = fila.text.strip()
                     if not texto_fila or any(palabra in texto_fila.lower() for palabra in [
@@ -189,62 +212,39 @@ class SimitScraper:
                         multa_count += 1
                         detalles += f"=== MULTA {multa_count} ===\n"
                         
-                        # Extraer datos según la estructura real de SIMIT
-                        if len(celdas) > 0:  # Tipo y número
-                            tipo_cell = celdas[0].text.strip()
-                            detalles += f"Tipo: {tipo_cell}\n"
-                        
-                        if len(celdas) > 1:  # Notificación
-                            notif_cell = celdas[1].text.strip()
-                            detalles += f"Notificación: {notif_cell}\n"
-                        
-                        if len(celdas) > 2:  # Placa
-                            placa_cell = celdas[2].text.strip()
-                            detalles += f"Placa: {placa_cell}\n"
-                        
-                        if len(celdas) > 3:  # Secretaría
-                            secretaria_cell = celdas[3].text.strip()
-                            detalles += f"Secretaría: {secretaria_cell}\n"
-                        
-                        if len(celdas) > 4:  # Infracción
-                            infraccion_cell = celdas[4].text.strip()
-                            detalles += f"Infracción: {infraccion_cell}\n"
-                        
-                        if len(celdas) > 5:  # Estado
-                            estado_cell = celdas[5].text.strip()
-                            detalles += f"Estado: {estado_cell}\n"
-                        
-                        if len(celdas) > 6:  # Valor
-                            valor_cell = celdas[6].text.strip()
-                            detalles += f"Valor: {valor_cell}\n"
-                        
-                        if len(celdas) > 7:  # Valor a pagar
-                            valor_pagar_cell = celdas[7].text.strip()
-                            detalles += f"Valor a pagar: {valor_pagar_cell}\n"
+                        # Extraer datos básicos
+                        for i, etiqueta in enumerate([
+                            "Tipo", "Notificación", "Placa", "Secretaría", 
+                            "Infracción", "Estado", "Valor", "Valor a pagar"
+                        ]):
+                            if i < len(celdas):
+                                valor = celdas[i].text.strip()
+                                if valor:
+                                    detalles += f"{etiqueta}: {valor}\n"
                         
                         detalles += "\n"
                         
                 except Exception as e:
-                    print(f"Error extrayendo fila de multa: {e}")
                     continue
                     
         except Exception as e:
-            print(f"Error extrayendo detalles de multas: {e}")
+            print(f"Error extrayendo detalles: {e}")
             detalles = "No se pudieron extraer detalles específicos"
             
         return detalles.strip() if detalles.strip() else "Sin detalles disponibles"
 
-    def tomar_captura_simple(self, placa, driver):
-        """Captura simple de pantalla"""
+    def tomar_captura_optimizada(self, placa, driver):
+        """Captura optimizada para Render"""
         try:
+            if self.proceso_cancelado:
+                return "Sin captura"
+                
             if not os.path.exists("capturas"):
                 os.makedirs("capturas")
             
             screenshot_path = f"capturas/{placa}_{datetime.now().strftime('%H%M%S')}.png"
             
-            driver.execute_script("window.scrollTo(0, 0);")
-            time.sleep(1)
-            
+            # Captura rápida sin scroll
             driver.save_screenshot(screenshot_path)
             
             if os.path.exists(screenshot_path):
@@ -252,37 +252,55 @@ class SimitScraper:
             else:
                 return "Sin captura"
                 
-        except:
+        except Exception as e:
+            print(f"Error en captura: {e}")
             return "Sin captura"
 
     def buscar_placas(self, placas):
         global progreso_actual
         
         try:
+            # Marcar inicio del proceso
             progreso_actual['estado'] = 'processing'
-            self.actualizar_progreso("Iniciando proceso...", total=len(placas), procesadas=0)
+            progreso_actual['inicio_proceso'] = datetime.now()
+            progreso_actual['thread_id'] = threading.current_thread().ident
             
-            # Railway maneja Chrome automáticamente
-            service = Service()  # Sin especificar ruta de chromedriver
-            options = configurar_chrome_para_railway()
+            self.actualizar_progreso("🚀 Iniciando proceso...", total=len(placas), procesadas=0)
             
-            self.driver = webdriver.Chrome(service=service, options=options)
+            # Configurar Chrome con timeout
+            service = Service()
+            options = configurar_chrome_para_render()
             
-            # Solo maximizar si no es headless
+            self.actualizar_progreso("🔧 Iniciando navegador...", total=len(placas), procesadas=0)
+            
+            try:
+                self.driver = webdriver.Chrome(service=service, options=options)
+                # Timeout para evitar colgados
+                self.driver.set_page_load_timeout(30)
+                self.driver.implicitly_wait(10)
+            except Exception as e:
+                raise Exception(f"Error iniciando Chrome: {str(e)}")
+            
             if platform.system() != "Linux":
                 self.driver.maximize_window()
             
-            self.actualizar_progreso("Navegando a SIMIT...", total=len(placas), procesadas=0)
-            self.driver.get("https://www.fcm.org.co/simit/#/home-public")
+            self.actualizar_progreso("🌐 Navegando a SIMIT...", total=len(placas), procesadas=0)
             
-            self.esperar_carga_simple(self.driver)
+            try:
+                self.driver.get("https://www.fcm.org.co/simit/#/home-public")
+                self.esperar_carga_optimizada(self.driver)
+            except Exception as e:
+                raise Exception(f"Error cargando SIMIT: {str(e)}")
             
             # Procesar cada placa
             for idx, placa in enumerate(placas):
-                try:
-                    self.actualizar_progreso(f"Procesando: {placa}", placa, len(placas), idx)
+                if self.proceso_cancelado:
+                    break
                     
-                    # Cerrar popups
+                try:
+                    self.actualizar_progreso(f"🔍 Procesando: {placa}", placa, len(placas), idx)
+                    
+                    # Cerrar popups con timeout
                     try:
                         popup = WebDriverWait(self.driver, 2).until(
                             EC.presence_of_element_located((By.CLASS_NAME, "swal2-popup"))
@@ -293,75 +311,95 @@ class SimitScraper:
                     except:
                         pass
 
-                    # Buscar placa
-                    campo_placa = WebDriverWait(self.driver, 10).until(
-                        EC.element_to_be_clickable((By.ID, "txtBusqueda"))
-                    )
+                    # Buscar placa con timeout
+                    try:
+                        campo_placa = WebDriverWait(self.driver, 10).until(
+                            EC.element_to_be_clickable((By.ID, "txtBusqueda"))
+                        )
+                        
+                        campo_placa.clear()
+                        time.sleep(0.5)
+                        campo_placa.send_keys(placa)
+                        time.sleep(1)
+                        campo_placa.send_keys("\n")
+                        
+                        # Esperar resultados (reducido)
+                        time.sleep(6)  # Reducido de 8 a 6 segundos
+                        
+                    except Exception as e:
+                        raise Exception(f"Error buscando placa {placa}: {str(e)}")
                     
-                    campo_placa.clear()
-                    time.sleep(0.5)
-                    campo_placa.send_keys(placa)
-                    time.sleep(1)
-                    campo_placa.send_keys("\n")
-                    
-                    # Esperar resultados
-                    time.sleep(8)
-                    
-                    # Detectar multas CORREGIDO
+                    # Detectar multas
                     tiene_multas, num_multas = self.detectar_multas_mejorada(self.driver, placa)
                     
                     # Extraer detalles si hay multas
                     detalle_multas = ""
-                    if tiene_multas:
-                        self.actualizar_progreso(f"Extrayendo detalles de {placa}...", placa, len(placas), idx)
+                    if tiene_multas and not self.proceso_cancelado:
+                        self.actualizar_progreso(f"📋 Extrayendo detalles de {placa}...", placa, len(placas), idx)
                         detalle_multas = self.extraer_detalles_multas(self.driver, placa)
                     
                     # Tomar captura
-                    screenshot_path = self.tomar_captura_simple(placa, self.driver)
+                    if not self.proceso_cancelado:
+                        screenshot_path = self.tomar_captura_optimizada(placa, self.driver)
+                    else:
+                        screenshot_path = "Sin captura"
                     
                     estado_multas = "Sí" if tiene_multas else "No"
                     self.resultados.append((placa, estado_multas, "Éxito", screenshot_path, detalle_multas))
                     
                     # Actualizar progreso
                     procesadas_actual = idx + 1
-                    self.actualizar_progreso(f"Completada: {placa} ({estado_multas} multas)", placa, len(placas), procesadas_actual)
+                    self.actualizar_progreso(f"✅ {placa}: {estado_multas} multas", placa, len(placas), procesadas_actual)
                     
-                    time.sleep(2)
+                    time.sleep(1)  # Pausa reducida
                     
                 except Exception as e:
                     procesadas_actual = idx + 1
-                    self.actualizar_progreso(f"Error en {placa}", placa, len(placas), procesadas_actual)
+                    self.actualizar_progreso(f"❌ Error en {placa}", placa, len(placas), procesadas_actual)
                     self.resultados.append((placa, "Error", "Error", "Sin captura", str(e)))
             
-            # Generar Excel
-            self.actualizar_progreso("Generando Excel...", total=len(placas), procesadas=len(placas))
-            archivo_excel = self.guardar_resultados_en_excel()
-            
-            if archivo_excel and os.path.exists(archivo_excel):
-                progreso_actual.update({
-                    'estado': 'completed',
-                    'resultados': self.resultados,
-                    'archivo_excel': archivo_excel,
-                    'porcentaje': 100,
-                    'procesadas': len(placas),
-                    'total': len(placas),
-                    'mensaje': 'Proceso completado. Excel listo para descarga.'
-                })
-            else:
-                raise Exception("Error generando Excel")
+            if not self.proceso_cancelado:
+                # Generar Excel
+                self.actualizar_progreso("📊 Generando Excel...", total=len(placas), procesadas=len(placas))
+                archivo_excel = self.guardar_resultados_en_excel()
+                
+                if archivo_excel and os.path.exists(archivo_excel):
+                    progreso_actual.update({
+                        'estado': 'completed',
+                        'resultados': self.resultados,
+                        'archivo_excel': archivo_excel,
+                        'porcentaje': 100,
+                        'procesadas': len(placas),
+                        'total': len(placas),
+                        'mensaje': '🎉 Proceso completado. Excel listo para descarga.'
+                    })
+                else:
+                    raise Exception("Error generando Excel")
             
         except Exception as e:
-            progreso_actual.update({
-                'estado': 'error',
-                'mensaje': f"Error: {str(e)}",
-                'porcentaje': 0
-            })
+            if not self.proceso_cancelado:
+                progreso_actual.update({
+                    'estado': 'error',
+                    'mensaje': f"💥 Error: {str(e)}",
+                    'porcentaje': 0
+                })
+                print(f"ERROR: {e}")
         finally:
             try:
                 if self.driver:
                     self.driver.quit()
+                    print("🔒 Navegador cerrado")
             except:
                 pass
+            
+            # Limpiar estado si fue cancelado
+            if self.proceso_cancelado:
+                progreso_actual.update({
+                    'estado': 'idle',
+                    'mensaje': 'Proceso cancelado',
+                    'inicio_proceso': None,
+                    'thread_id': None
+                })
 
     def guardar_resultados_en_excel(self):
         try:
@@ -375,32 +413,32 @@ class SimitScraper:
             ws1 = wb.active
             ws1.title = "Control de Multas"
 
-            # Colores y estilos - RESTAURADOS
+            # Colores y estilos
             verde_oscuro = "1F7246"
             verde_claro = "C6E0B4"
             rojo_claro = "FFE6E6"
             
-            # Configuración de columnas - MEJORADA
+            # Configuración de columnas
             ws1.column_dimensions['A'].width = 15
             ws1.column_dimensions['B'].width = 15
             ws1.column_dimensions['C'].width = 15
             ws1.column_dimensions['D'].width = 35
-            ws1.column_dimensions['E'].width = 50  # Para detalles
+            ws1.column_dimensions['E'].width = 50
 
-            # Título principal - RESTAURADO
+            # Título principal
             ws1.merge_cells('A1:E2')
             titulo = ws1.cell(row=1, column=1, value="FORMATO DE CONTROL DE MULTAS DE TRÁNSITO")
             titulo.font = Font(name='Arial', size=16, bold=True, color="FFFFFF")
             titulo.alignment = Alignment(horizontal="center", vertical="center")
             titulo.fill = PatternFill(start_color=verde_oscuro, end_color=verde_oscuro, fill_type="solid")
 
-            # Fecha del reporte - RESTAURADA
+            # Fecha del reporte
             ws1.merge_cells('A3:E3')
             fecha = ws1.cell(row=3, column=1, value=f"Reporte generado el: {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
             fecha.font = Font(name='Arial', size=10, italic=True)
             fecha.alignment = Alignment(horizontal="right")
 
-            # Encabezados - RESTAURADOS con columna de detalles
+            # Encabezados
             encabezados = ["Placa", "Estado Multas", "Resultado", "Evidencia", "Detalles"]
             for col, encabezado in enumerate(encabezados, 1):
                 celda = ws1.cell(row=4, column=col, value=encabezado)
@@ -408,9 +446,9 @@ class SimitScraper:
                 celda.fill = PatternFill(start_color=verde_oscuro, end_color=verde_oscuro, fill_type="solid")
                 celda.alignment = Alignment(horizontal="center", vertical="center")
 
-            # Datos - MEJORADOS
+            # Datos
             for idx, (placa, tiene_multa, resultado, captura, detalle_multas) in enumerate(self.resultados, 5):
-                # Color de fila según estado - RESTAURADO
+                # Color de fila según estado
                 if tiene_multa == "Sí":
                     fill_color = rojo_claro
                 elif resultado == "Error":
@@ -418,7 +456,6 @@ class SimitScraper:
                 else:
                     fill_color = verde_claro if idx % 2 == 0 else "FFFFFF"
                 
-                # Datos de la fila - INCLUYENDO DETALLES
                 datos_fila = [placa, tiene_multa, resultado, "Ver imagen adjunta", detalle_multas or "Sin detalles"]
                 
                 for col_idx, valor in enumerate(datos_fila, 1):
@@ -430,10 +467,10 @@ class SimitScraper:
                     elif col_idx == 2 and tiene_multa == "Sí":  # Estado Multas
                         celda.font = Font(color="FF0000", bold=True)
                         celda.alignment = Alignment(horizontal="center")
-                    elif col_idx == 5:  # Detalles - RESTAURADO
+                    elif col_idx == 5:  # Detalles
                         celda.alignment = Alignment(wrap_text=True, vertical="top")
                 
-                # Agregar imagen - RESTAURADO
+                # Agregar imagen
                 if captura != "Sin captura" and os.path.exists(captura):
                     try:
                         img = Image(captura)
@@ -456,7 +493,7 @@ class SimitScraper:
             print(f"Error generando Excel: {e}")
             return None
 
-# RUTAS FLASK
+# RUTAS FLASK MEJORADAS
 @app.route('/')
 def index():
     return render_template_string(HTML_TEMPLATE)
@@ -466,6 +503,9 @@ def iniciar_proceso():
     global progreso_actual
     
     try:
+        # Limpiar procesos colgados antes de iniciar
+        limpiar_proceso_si_colgado()
+        
         data = request.get_json()
         placas_texto = data.get('placas', '')
         placas = [placa.strip().upper() for placa in placas_texto.split('\n') if placa.strip()]
@@ -474,7 +514,13 @@ def iniciar_proceso():
             return jsonify({'error': 'No se ingresaron placas válidas'}), 400
         
         if progreso_actual['estado'] == 'processing':
-            return jsonify({'error': 'Ya hay un proceso en ejecución'}), 400
+            # Verificar si realmente está procesando o está colgado
+            if (progreso_actual['inicio_proceso'] and 
+                datetime.now() - progreso_actual['inicio_proceso'] > timedelta(seconds=30)):
+                print("🧹 Forzando limpieza de proceso aparentemente colgado")
+                limpiar_proceso_si_colgado()
+            else:
+                return jsonify({'error': 'Ya hay un proceso en ejecución. Espere unos minutos.'}), 400
         
         # Reiniciar progreso
         progreso_actual = {
@@ -485,7 +531,9 @@ def iniciar_proceso():
             'procesadas': 0,
             'porcentaje': 0,
             'resultados': [],
-            'archivo_excel': ''
+            'archivo_excel': '',
+            'inicio_proceso': datetime.now(),
+            'thread_id': None
         }
         
         scraper = SimitScraper()
@@ -493,15 +541,34 @@ def iniciar_proceso():
         thread.daemon = True
         thread.start()
         
+        progreso_actual['thread_id'] = thread.ident
+        
         return jsonify({'success': True, 'mensaje': 'Proceso iniciado', 'total_placas': len(placas)})
         
     except Exception as e:
+        print(f"Error en iniciar_proceso: {e}")
         return jsonify({'error': f'Error: {str(e)}'}), 500
 
 @app.route('/progreso')
 def obtener_progreso():
     global progreso_actual
+    
+    # Verificar si el proceso está colgado
+    limpiar_proceso_si_colgado()
+    
     return jsonify(progreso_actual.copy())
+
+@app.route('/cancelar_proceso', methods=['POST'])
+def cancelar_proceso():
+    """Nueva ruta para cancelar procesos"""
+    global progreso_actual
+    
+    if progreso_actual['estado'] == 'processing':
+        print("🛑 Cancelando proceso...")
+        limpiar_proceso_si_colgado()
+        return jsonify({'success': True, 'mensaje': 'Proceso cancelado'})
+    else:
+        return jsonify({'error': 'No hay proceso activo'}), 400
 
 @app.route('/descargar_excel')
 def descargar_excel():
@@ -522,7 +589,7 @@ def descargar_excel():
     else:
         return jsonify({'error': 'No hay archivo disponible'}), 404
 
-# HTML TEMPLATE
+# HTML TEMPLATE MEJORADO
 HTML_TEMPLATE = '''
 <!DOCTYPE html>
 <html lang="es">
@@ -607,6 +674,7 @@ HTML_TEMPLATE = '''
             cursor: pointer;
             width: 100%;
             font-weight: bold;
+            margin-bottom: 10px;
         }
         
         .btn:hover:not(:disabled) {
@@ -617,6 +685,11 @@ HTML_TEMPLATE = '''
             background: #ccc;
             cursor: not-allowed;
             transform: none;
+        }
+        
+        .btn-cancel {
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+            display: none;
         }
         
         .progress-container {
@@ -712,16 +785,30 @@ HTML_TEMPLATE = '''
             color: #0c5460;
             border: 2px solid #abdde5;
         }
+        
+        .improvements-banner {
+            background: linear-gradient(135deg, #17a2b8 0%, #138496 100%);
+            color: white;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-radius: 10px;
+            text-align: center;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>🚗 SIMIT Scraper</h1>
-            <p>Sistema de Control de Multas</p>
+            <h1>🚗 SIMIT Scraper Optimizado</h1>
+            <p>Sistema de Control de Multas - Versión Mejorada</p>
         </div>
         
         <div class="content">
+            <div class="improvements-banner">
+                <h4>🚀 Mejoras Implementadas</h4>
+                <p>✅ Sin procesos colgados | ✅ Timeouts optimizados | ✅ Cancelación de procesos | ✅ Limpieza automática</p>
+            </div>
+            
             <div class="input-group">
                 <label for="placas">Ingrese las placas (una por línea):</label>
                 <textarea 
@@ -734,6 +821,10 @@ DEF456</textarea>
             
             <button id="iniciarBtn" class="btn" onclick="iniciarProceso()">
                 🚀 Iniciar Búsqueda
+            </button>
+            
+            <button id="cancelarBtn" class="btn btn-cancel" onclick="cancelarProceso()">
+                🛑 Cancelar Proceso
             </button>
             
             <div id="progressContainer" class="progress-container">
@@ -773,6 +864,8 @@ DEF456</textarea>
     <script>
         let intervalId = null;
         let procesoIniciado = false;
+        let contadorErrores = 0;
+        const MAX_ERRORES = 5;
         
         function iniciarProceso() {
             const placasTexto = document.getElementById('placas').value.trim();
@@ -794,11 +887,15 @@ DEF456</textarea>
             }
             
             procesoIniciado = true;
+            contadorErrores = 0;
             
             // Cambiar UI
             const btn = document.getElementById('iniciarBtn');
+            const cancelBtn = document.getElementById('cancelarBtn');
+            
             btn.disabled = true;
             btn.textContent = '⏳ Procesando...';
+            cancelBtn.style.display = 'block';
             
             document.getElementById('progressContainer').style.display = 'block';
             document.getElementById('resultsContainer').style.display = 'none';
@@ -832,12 +929,40 @@ DEF456</textarea>
             });
         }
         
+        function cancelarProceso() {
+            if (!confirm('¿Está seguro que desea cancelar el proceso?')) {
+                return;
+            }
+            
+            fetch('/cancelar_proceso', {
+                method: 'POST'
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    clearInterval(intervalId);
+                    procesoIniciado = false;
+                    resetearUI();
+                    
+                    const statusMessage = document.getElementById('statusMessage');
+                    const statusText = document.getElementById('statusText');
+                    statusMessage.className = 'status-message status-error';
+                    statusText.textContent = 'Proceso cancelado por el usuario';
+                }
+            })
+            .catch(error => {
+                console.error('Error cancelando proceso:', error);
+            });
+        }
+        
         function actualizarProgreso() {
             if (!procesoIniciado) return;
             
             fetch('/progreso')
             .then(response => response.json())
             .then(data => {
+                contadorErrores = 0; // Reset error counter on success
+                
                 const porcentaje = Math.max(0, Math.min(100, data.porcentaje || 0));
                 
                 // Actualizar barra
@@ -875,19 +1000,42 @@ DEF456</textarea>
                     clearInterval(intervalId);
                     procesoIniciado = false;
                     resetearUI();
+                } else if (data.estado === 'idle' && procesoIniciado) {
+                    // El proceso fue limpiado automáticamente
+                    statusMessage.classList.add('status-error');
+                    statusText.textContent = 'Proceso reiniciado automáticamente. Intente de nuevo.';
+                    clearInterval(intervalId);
+                    procesoIniciado = false;
+                    resetearUI();
                 } else {
                     statusMessage.classList.add('status-info');
                 }
             })
             .catch(error => {
-                console.error('Error polling:', error);
+                contadorErrores++;
+                console.error(`Error polling (${contadorErrores}/${MAX_ERRORES}):`, error);
+                
+                if (contadorErrores >= MAX_ERRORES) {
+                    console.error('Muchos errores consecutivos, deteniendo polling');
+                    clearInterval(intervalId);
+                    procesoIniciado = false;
+                    resetearUI();
+                    
+                    const statusMessage = document.getElementById('statusMessage');
+                    const statusText = document.getElementById('statusText');
+                    statusMessage.className = 'status-message status-error';
+                    statusText.textContent = 'Conexión perdida. Refresque la página.';
+                }
             });
         }
         
         function resetearUI() {
             const btn = document.getElementById('iniciarBtn');
+            const cancelBtn = document.getElementById('cancelarBtn');
+            
             btn.disabled = false;
             btn.textContent = '🚀 Iniciar Búsqueda';
+            cancelBtn.style.display = 'none';
         }
         
         function descargarExcel() {
@@ -923,6 +1071,20 @@ DEF456</textarea>
                 alert('Error al descargar: ' + error.message);
             });
         }
+        
+        // Auto-resize textarea
+        document.getElementById('placas').addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = Math.max(200, this.scrollHeight) + 'px';
+        });
+        
+        // Prevenir cierre accidental durante proceso
+        window.addEventListener('beforeunload', function(e) {
+            if (procesoIniciado) {
+                e.preventDefault();
+                e.returnValue = '¿Estás seguro? Hay un proceso en ejecución.';
+            }
+        });
     </script>
 </body>
 </html>
@@ -931,4 +1093,3 @@ DEF456</textarea>
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(debug=False, host='0.0.0.0', port=port)
-
