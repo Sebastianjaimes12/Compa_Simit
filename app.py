@@ -116,19 +116,84 @@ class SimitScraper:
             'porcentaje': porcentaje
         })
 
-    def esperar_carga_ultra_rapida(self, driver):
-        """Espera ultra optimizada para evitar timeouts"""
+    def esperar_simit_completamente(self, driver):
+        """Espera específica para que SIMIT esté listo"""
         try:
-            # NO esperar por complete - solo por interactive
-            WebDriverWait(driver, 10).until(
-                lambda d: d.execute_script("return document.readyState") in ["interactive", "complete"]
+            print("⏳ Esperando que SIMIT esté completamente cargado...")
+            
+            # 1. Esperar que Angular/Vue esté listo
+            WebDriverWait(driver, 15).until(
+                lambda d: d.execute_script("return document.readyState") == "complete"
             )
-            time.sleep(1)  # Mínimo necesario
+            time.sleep(3)
+            
+            # 2. Esperar específicamente por el campo de búsqueda
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.ID, "txtBusqueda"))
+            )
+            time.sleep(2)
+            
+            # 3. Verificar que el campo sea interactuable
+            WebDriverWait(driver, 10).until(
+                EC.element_to_be_clickable((By.ID, "txtBusqueda"))
+            )
+            time.sleep(2)
+            
+            print("✅ SIMIT completamente cargado y listo")
             return True
+            
         except Exception as e:
-            print(f"⚠️ Timeout en carga - continuando: {e}")
-            time.sleep(1)
-            return True
+            print(f"⚠️ Timeout esperando SIMIT: {e}")
+            return False
+
+    def navegar_a_simit_con_reintentos(self, driver):
+        """Navegación robusta a SIMIT con múltiples intentos"""
+        urls_simit = [
+            "https://www.fcm.org.co/simit/#/home-public",
+            "https://www.fcm.org.co/simit/",
+            "https://fcm.org.co/simit/#/home-public"
+        ]
+        
+        for intento, url in enumerate(urls_simit):
+            try:
+                print(f"🌐 Intento {intento + 1}: Navegando a {url}")
+                
+                driver.get(url)
+                
+                # Esperar que SIMIT esté listo
+                if self.esperar_simit_completamente(driver):
+                    print(f"✅ SIMIT cargado exitosamente en intento {intento + 1}")
+                    return True
+                    
+            except Exception as e:
+                print(f"❌ Error en intento {intento + 1}: {e}")
+                if intento < len(urls_simit) - 1:
+                    print("🔄 Probando siguiente URL...")
+                    time.sleep(2)
+                    continue
+        
+        # Si fallan todas las URLs, intentar estrategia manual
+        print("🔧 Intentando estrategia manual...")
+        try:
+            driver.get("https://www.fcm.org.co/")
+            time.sleep(5)
+            
+            # Intentar hacer click en el enlace de SIMIT si existe
+            try:
+                enlace_simit = driver.find_element(By.LINK_TEXT, "SIMIT")
+                enlace_simit.click()
+                time.sleep(5)
+                
+                if self.esperar_simit_completamente(driver):
+                    print("✅ SIMIT cargado mediante navegación manual")
+                    return True
+            except:
+                pass
+                
+        except Exception as e:
+            print(f"❌ Error en estrategia manual: {e}")
+        
+        return False
 
     def detectar_multas_mejorada(self, driver, placa):
         """Detección mejorada y más rápida"""
@@ -299,40 +364,11 @@ class SimitScraper:
             
             self.actualizar_progreso("🌐 Navegando a SIMIT...", total=len(placas), procesadas=0)
             
-            try:
-                # Intentar cargar SIMIT con múltiples estrategias
-                print("🌐 Intentando cargar SIMIT...")
-                
-                # Estrategia 1: Carga directa
-                try:
-                    self.driver.get("https://www.fcm.org.co/simit/#/home-public")
-                    self.esperar_carga_ultra_rapida(self.driver)
-                    print("✅ SIMIT cargado correctamente")
-                except Exception as e:
-                    print(f"⚠️ Error en carga directa: {e}")
-                    
-                    # Estrategia 2: Carga con stop
-                    try:
-                        print("🔄 Intentando carga alternativa...")
-                        self.driver.execute_script("window.stop();")
-                        time.sleep(2)
-                        self.driver.get("https://www.fcm.org.co/simit/")  # URL más simple
-                        self.esperar_carga_ultra_rapida(self.driver)
-                        print("✅ SIMIT cargado con estrategia alternativa")
-                    except Exception as e2:
-                        print(f"⚠️ Error en carga alternativa: {e2}")
-                        # Continuar de todas formas
-                        time.sleep(3)
-                        
-            except Exception as e:
-                # Si falla completamente, intentar con URL básica
-                print(f"⚠️ Error general cargando SIMIT: {e}")
-                try:
-                    self.driver.get("https://www.fcm.org.co/")
-                    time.sleep(3)
-                    print("✅ Cargada página base de FCM")
-                except:
-                    raise Exception("No se pudo cargar ninguna página de SIMIT")
+            # Navegación robusta a SIMIT
+            if not self.navegar_a_simit_con_reintentos(self.driver):
+                raise Exception("No se pudo cargar SIMIT después de múltiples intentos")
+            
+            print("🎯 SIMIT cargado correctamente - comenzando búsquedas...")
             
             # Procesar cada placa
             for idx, placa in enumerate(placas):
@@ -353,26 +389,65 @@ class SimitScraper:
                     except:
                         pass
 
-                    # Buscar placa con timeout MUY corto
+                    # Buscar campo de placa con verificación robusta
                     try:
-                        campo_placa = WebDriverWait(self.driver, 5).until(  # Reducido de 10 a 5
+                        print(f"🔍 Buscando campo de búsqueda para {placa}...")
+                        
+                        # Verificar que el campo existe y es visible
+                        campo_placa = WebDriverWait(self.driver, 10).until(
+                            EC.presence_of_element_located((By.ID, "txtBusqueda"))
+                        )
+                        
+                        # Verificar que el campo es interactuable
+                        WebDriverWait(self.driver, 5).until(
                             EC.element_to_be_clickable((By.ID, "txtBusqueda"))
                         )
                         
-                        campo_placa.clear()
-                        time.sleep(0.3)  # Reducido
-                        campo_placa.send_keys(placa)
-                        time.sleep(0.5)  # Reducido
-                        campo_placa.send_keys("\n")
+                        # Scroll al elemento si es necesario
+                        self.driver.execute_script("arguments[0].scrollIntoView(true);", campo_placa)
+                        time.sleep(1)
                         
-                        # Esperar resultados (muy reducido)
-                        time.sleep(4)  # Reducido de 6 a 4 segundos
+                        # Hacer click para asegurar que está activo
+                        campo_placa.click()
+                        time.sleep(0.5)
+                        
+                        # Limpiar y escribir
+                        campo_placa.clear()
+                        time.sleep(0.5)
+                        campo_placa.send_keys(placa)
+                        time.sleep(1)
+                        
+                        # Enviar búsqueda (múltiples métodos)
+                        try:
+                            campo_placa.send_keys("\n")
+                        except:
+                            # Método alternativo: buscar botón de búsqueda
+                            try:
+                                boton_buscar = self.driver.find_element(By.XPATH, "//button[contains(@class, 'btn') or contains(text(), 'Buscar')]")
+                                boton_buscar.click()
+                            except:
+                                # Método JavaScript como último recurso
+                                self.driver.execute_script("arguments[0].form.submit();", campo_placa)
+                        
+                        print(f"✅ Búsqueda enviada para {placa}")
+                        
+                        # Esperar resultados
+                        time.sleep(6)
                         
                     except Exception as e:
-                        print(f"⚠️ Error buscando {placa}: {e}")
-                        # Continuar con la siguiente placa en lugar de fallar
-                        self.resultados.append((placa, "Error", "Error de búsqueda", "Sin captura", str(e)))
-                        continue
+                        print(f"❌ Error buscando {placa}: {e}")
+                        # Intentar recargar SIMIT si el campo no está disponible
+                        try:
+                            print("🔄 Recargando SIMIT...")
+                            if self.navegar_a_simit_con_reintentos(self.driver):
+                                print("✅ SIMIT recargado, continuando...")
+                                continue
+                            else:
+                                raise Exception("No se pudo recargar SIMIT")
+                        except:
+                            print(f"❌ Error crítico con {placa}")
+                            self.resultados.append((placa, "Error", "Campo no interactuable", "Sin captura", str(e)))
+                            continue
                     
                     # Detectar multas
                     tiene_multas, num_multas = self.detectar_multas_mejorada(self.driver, placa)
