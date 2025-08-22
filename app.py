@@ -15,21 +15,33 @@ from openpyxl.drawing.image import Image
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 import platform
 
-# Configuración para Render (Linux)
+# Configuración OPTIMIZADA para Render
 def configurar_chrome_para_render():
     options = Options()
     
     if platform.system() == "Linux":
+        # Configuración agresiva para evitar timeouts
         options.add_argument('--headless')
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
         options.add_argument('--disable-gpu')
-        options.add_argument('--remote-debugging-port=9222')
         options.add_argument('--disable-extensions')
         options.add_argument('--disable-plugins')
-        options.add_argument('--window-size=1920,1080')
-        options.add_argument('--disable-images')  # Cargar más rápido
-        options.add_argument('--disable-javascript')  # Solo para scraping básico
+        options.add_argument('--disable-images')
+        options.add_argument('--disable-background-timer-throttling')
+        options.add_argument('--disable-backgrounding-occluded-windows')
+        options.add_argument('--disable-renderer-backgrounding')
+        options.add_argument('--disable-features=TranslateUI')
+        options.add_argument('--disable-ipc-flooding-protection')
+        options.add_argument('--window-size=1280,720')  # Tamaño más pequeño
+        options.add_argument('--memory-pressure-off')
+        options.add_argument('--single-process')  # Proceso único para usar menos memoria
+        
+        # Timeouts más agresivos
+        options.add_argument('--page-load-strategy=none')
+        options.add_experimental_option('useAutomationExtension', False)
+        options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        
         options.binary_location = "/usr/bin/google-chrome"
     else:
         options.add_argument('--no-sandbox')
@@ -104,18 +116,18 @@ class SimitScraper:
             'porcentaje': porcentaje
         })
 
-    def esperar_carga_optimizada(self, driver):
-        """Espera optimizada para Render"""
+    def esperar_carga_ultra_rapida(self, driver):
+        """Espera ultra optimizada para evitar timeouts"""
         try:
-            # Espera más corta para evitar timeouts
-            WebDriverWait(driver, 15).until(
-                lambda d: d.execute_script("return document.readyState") == "complete"
+            # NO esperar por complete - solo por interactive
+            WebDriverWait(driver, 10).until(
+                lambda d: d.execute_script("return document.readyState") in ["interactive", "complete"]
             )
-            time.sleep(3)  # Reducido de 5 a 3 segundos
+            time.sleep(1)  # Mínimo necesario
             return True
         except Exception as e:
-            print(f"⚠️ Timeout en espera de carga: {e}")
-            time.sleep(3)
+            print(f"⚠️ Timeout en carga - continuando: {e}")
+            time.sleep(1)
             return True
 
     def detectar_multas_mejorada(self, driver, placa):
@@ -275,9 +287,10 @@ class SimitScraper:
             
             try:
                 self.driver = webdriver.Chrome(service=service, options=options)
-                # Timeout para evitar colgados
-                self.driver.set_page_load_timeout(30)
-                self.driver.implicitly_wait(10)
+                # Timeouts MUY agresivos para evitar colgados
+                self.driver.set_page_load_timeout(20)  # Reducido de 30 a 20
+                self.driver.implicitly_wait(5)  # Reducido de 10 a 5
+                print("✅ Chrome iniciado correctamente")
             except Exception as e:
                 raise Exception(f"Error iniciando Chrome: {str(e)}")
             
@@ -287,10 +300,39 @@ class SimitScraper:
             self.actualizar_progreso("🌐 Navegando a SIMIT...", total=len(placas), procesadas=0)
             
             try:
-                self.driver.get("https://www.fcm.org.co/simit/#/home-public")
-                self.esperar_carga_optimizada(self.driver)
+                # Intentar cargar SIMIT con múltiples estrategias
+                print("🌐 Intentando cargar SIMIT...")
+                
+                # Estrategia 1: Carga directa
+                try:
+                    self.driver.get("https://www.fcm.org.co/simit/#/home-public")
+                    self.esperar_carga_ultra_rapida(self.driver)
+                    print("✅ SIMIT cargado correctamente")
+                except Exception as e:
+                    print(f"⚠️ Error en carga directa: {e}")
+                    
+                    # Estrategia 2: Carga con stop
+                    try:
+                        print("🔄 Intentando carga alternativa...")
+                        self.driver.execute_script("window.stop();")
+                        time.sleep(2)
+                        self.driver.get("https://www.fcm.org.co/simit/")  # URL más simple
+                        self.esperar_carga_ultra_rapida(self.driver)
+                        print("✅ SIMIT cargado con estrategia alternativa")
+                    except Exception as e2:
+                        print(f"⚠️ Error en carga alternativa: {e2}")
+                        # Continuar de todas formas
+                        time.sleep(3)
+                        
             except Exception as e:
-                raise Exception(f"Error cargando SIMIT: {str(e)}")
+                # Si falla completamente, intentar con URL básica
+                print(f"⚠️ Error general cargando SIMIT: {e}")
+                try:
+                    self.driver.get("https://www.fcm.org.co/")
+                    time.sleep(3)
+                    print("✅ Cargada página base de FCM")
+                except:
+                    raise Exception("No se pudo cargar ninguna página de SIMIT")
             
             # Procesar cada placa
             for idx, placa in enumerate(placas):
@@ -311,23 +353,26 @@ class SimitScraper:
                     except:
                         pass
 
-                    # Buscar placa con timeout
+                    # Buscar placa con timeout MUY corto
                     try:
-                        campo_placa = WebDriverWait(self.driver, 10).until(
+                        campo_placa = WebDriverWait(self.driver, 5).until(  # Reducido de 10 a 5
                             EC.element_to_be_clickable((By.ID, "txtBusqueda"))
                         )
                         
                         campo_placa.clear()
-                        time.sleep(0.5)
+                        time.sleep(0.3)  # Reducido
                         campo_placa.send_keys(placa)
-                        time.sleep(1)
+                        time.sleep(0.5)  # Reducido
                         campo_placa.send_keys("\n")
                         
-                        # Esperar resultados (reducido)
-                        time.sleep(6)  # Reducido de 8 a 6 segundos
+                        # Esperar resultados (muy reducido)
+                        time.sleep(4)  # Reducido de 6 a 4 segundos
                         
                     except Exception as e:
-                        raise Exception(f"Error buscando placa {placa}: {str(e)}")
+                        print(f"⚠️ Error buscando {placa}: {e}")
+                        # Continuar con la siguiente placa en lugar de fallar
+                        self.resultados.append((placa, "Error", "Error de búsqueda", "Sin captura", str(e)))
+                        continue
                     
                     # Detectar multas
                     tiene_multas, num_multas = self.detectar_multas_mejorada(self.driver, placa)
