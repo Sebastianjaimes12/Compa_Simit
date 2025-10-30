@@ -9,6 +9,7 @@ import os
 import time
 import json
 import threading
+import traceback
 from datetime import datetime, timedelta
 from openpyxl import Workbook
 from openpyxl.drawing.image import Image
@@ -19,24 +20,55 @@ import platform
 def configurar_chrome_para_render():
     options = Options()
     
+    print(f"🖥️  Sistema detectado: {platform.system()}")
+    
     if platform.system() == "Linux":
-        options.add_argument('--headless')
+        print("🐧 Configurando Chrome para Linux/Render...")
+        
+        # Opciones críticas para Render
+        options.add_argument('--headless=new')  # Usar nuevo headless
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
         options.add_argument('--disable-gpu')
+        options.add_argument('--disable-software-rasterizer')
         options.add_argument('--disable-extensions')
         options.add_argument('--disable-plugins')
         options.add_argument('--disable-images')
-        options.add_argument('--window-size=1280,720')
-        options.add_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36')
-        options.add_experimental_option('useAutomationExtension', False)
-        options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        options.binary_location = "/usr/bin/google-chrome"
+        options.add_argument('--window-size=1920,1080')
+        options.add_argument('--disable-setuid-sandbox')
+        options.add_argument('--disable-infobars')
+        options.add_argument('--disable-logging')
+        options.add_argument('--disable-permissions-api')
+        options.add_argument('--ignore-certificate-errors')
+        options.add_argument('--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36')
+        
+        # Intentar encontrar Chrome en diferentes ubicaciones
+        posibles_ubicaciones = [
+            "/usr/bin/google-chrome",
+            "/usr/bin/chromium",
+            "/usr/bin/chromium-browser",
+            "/opt/google/chrome/chrome"
+        ]
+        
+        chrome_encontrado = False
+        for ubicacion in posibles_ubicaciones:
+            if os.path.exists(ubicacion):
+                print(f"✅ Chrome encontrado en: {ubicacion}")
+                options.binary_location = ubicacion
+                chrome_encontrado = True
+                break
+        
+        if not chrome_encontrado:
+            print("⚠️ Chrome no encontrado en ubicaciones predeterminadas")
+            print("📍 Intentando usar Chrome del sistema...")
+        
     else:
+        print("🪟 Configurando Chrome para desarrollo local...")
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
         options.add_argument('--disable-gpu')
     
+    print("✅ Opciones de Chrome configuradas")
     return options
 
 app = Flask(__name__)
@@ -54,7 +86,7 @@ progreso_actual = {
     'inicio_proceso': None
 }
 
-TIMEOUT_PROCESO = 900  # 15 minutos
+TIMEOUT_PROCESO = 600  # 10 minutos
 
 def limpiar_proceso_si_colgado():
     global progreso_actual
@@ -398,81 +430,119 @@ class SimitScraper:
             progreso_actual['inicio_proceso'] = datetime.now()
             
             self.actualizar_progreso("🚀 Iniciando proceso...", total=len(placas), procesadas=0)
+            print("="*50)
+            print("🚀 INICIANDO PROCESO DE SCRAPING")
+            print(f"📋 Total de placas: {len(placas)}")
+            print(f"🖥️  Sistema operativo: {platform.system()}")
+            print("="*50)
             
             # Configurar Chrome
             service = Service()
             options = configurar_chrome_para_render()
             
             self.actualizar_progreso("🔧 Iniciando navegador...", total=len(placas), procesadas=0)
+            print("\n🔧 Configurando Chrome...")
             
             try:
+                print("🌐 Intentando iniciar Chrome...")
                 self.driver = webdriver.Chrome(service=service, options=options)
-                self.driver.set_page_load_timeout(40)  # Timeout generoso
+                self.driver.set_page_load_timeout(40)
                 self.driver.implicitly_wait(10)
                 print("✅ Chrome iniciado correctamente")
+                print(f"📍 Versión de Chrome: {self.driver.capabilities.get('browserVersion', 'Desconocida')}")
+                print(f"📍 ChromeDriver: {self.driver.capabilities.get('chrome', {}).get('chromedriverVersion', 'Desconocida')}")
             except Exception as e:
-                raise Exception(f"Error iniciando Chrome: {str(e)}")
+                error_msg = f"❌ ERROR CRÍTICO iniciando Chrome: {str(e)}"
+                print(error_msg)
+                print(f"❌ Tipo de error: {type(e).__name__}")
+                print(f"❌ Detalles completos: {repr(e)}")
+                raise Exception(error_msg)
             
             # Llegar a SIMIT
             self.actualizar_progreso("🌐 Navegando a SIMIT...", total=len(placas), procesadas=0)
+            print("\n🌐 Intentando llegar a SIMIT...")
             
-            simit_funcional = self.llegar_a_simit_definitivo(self.driver)
-            if not simit_funcional:
-                print("⚠️ SIMIT no completamente funcional, pero continuando...")
+            try:
+                simit_funcional = self.llegar_a_simit_definitivo(self.driver)
+                if simit_funcional:
+                    print("✅ SIMIT completamente funcional")
+                else:
+                    print("⚠️ SIMIT no completamente funcional, pero continuando...")
+            except Exception as e:
+                print(f"❌ Error llegando a SIMIT: {e}")
+                print("⚠️ Intentando continuar de todas formas...")
             
             # Procesar cada placa
+            print(f"\n📋 Iniciando procesamiento de {len(placas)} placa(s)...")
+            
             for idx, placa in enumerate(placas):
                 if self.proceso_cancelado:
+                    print("🛑 Proceso cancelado por usuario")
                     break
-                    
+                
+                print(f"\n{'='*50}")
+                print(f"🔍 PROCESANDO PLACA {idx+1}/{len(placas)}: {placa}")
+                print(f"{'='*50}")
+                
                 try:
                     self.actualizar_progreso(f"🔍 Procesando: {placa}", placa, len(placas), idx)
                     
                     # Buscar placa
+                    print(f"📝 Buscando placa {placa}...")
                     if self.buscar_placa_robusta(self.driver, placa):
+                        print(f"✅ Búsqueda enviada para {placa}")
+                        
                         # Esperar resultados
+                        print(f"⏳ Esperando resultados para {placa}...")
                         time.sleep(8)
                         
                         # Detectar multas
+                        print(f"🔎 Detectando multas para {placa}...")
                         tiene_multas, num_multas = self.detectar_multas_simple(self.driver, placa)
+                        print(f"📊 Resultado: {'TIENE' if tiene_multas else 'NO TIENE'} multas ({num_multas})")
                         
                         # Extraer detalles si hay multas
                         detalle_multas = ""
                         if tiene_multas:
                             self.actualizar_progreso(f"📋 Extrayendo detalles de {placa}...", placa, len(placas), idx)
+                            print(f"📄 Extrayendo detalles de multas...")
                             detalle_multas = self.extraer_detalles_simple(self.driver, placa)
                         
                         # Tomar captura
+                        print(f"📸 Tomando captura de pantalla...")
                         screenshot_path = self.tomar_captura_simple(placa, self.driver)
                         
                         estado_multas = "Sí" if tiene_multas else "No"
                         self.resultados.append((placa, estado_multas, "Éxito", screenshot_path, detalle_multas))
                         
-                        print(f"✅ {placa}: {estado_multas} multas")
+                        print(f"✅ {placa} procesada exitosamente: {estado_multas} multas")
                         
                     else:
-                        # Si no se pudo buscar
+                        print(f"❌ No se pudo buscar {placa}")
                         screenshot_path = self.tomar_captura_simple(placa, self.driver)
                         self.resultados.append((placa, "Error", "No se pudo buscar", screenshot_path, "Error en búsqueda"))
-                        print(f"❌ {placa}: Error en búsqueda")
                     
                     # Actualizar progreso
                     procesadas_actual = idx + 1
                     self.actualizar_progreso(f"✅ Completada: {placa}", placa, len(placas), procesadas_actual)
+                    print(f"📊 Progreso: {procesadas_actual}/{len(placas)} ({(procesadas_actual/len(placas)*100):.1f}%)")
                     
                 except Exception as e:
                     procesadas_actual = idx + 1
+                    error_msg = f"❌ ERROR procesando {placa}: {str(e)}"
+                    print(error_msg)
+                    print(f"❌ Tipo de error: {type(e).__name__}")
                     self.actualizar_progreso(f"❌ Error en {placa}", placa, len(placas), procesadas_actual)
                     screenshot_path = self.tomar_captura_simple(placa, self.driver)
                     self.resultados.append((placa, "Error", "Error", screenshot_path, str(e)))
-                    print(f"❌ Error en {placa}: {e}")
             
             if not self.proceso_cancelado:
-                # Generar Excel
+                print("\n📊 Generando Excel...")
                 self.actualizar_progreso("📊 Generando Excel...", total=len(placas), procesadas=len(placas))
                 archivo_excel = self.guardar_resultados_en_excel()
                 
                 if archivo_excel and os.path.exists(archivo_excel):
+                    print(f"✅ Excel generado: {archivo_excel}")
                     progreso_actual.update({
                         'estado': 'completed',
                         'resultados': self.resultados,
@@ -487,20 +557,24 @@ class SimitScraper:
                     raise Exception("Error generando Excel")
             
         except Exception as e:
+            error_completo = f"💥 ERROR GENERAL: {str(e)}\nTipo: {type(e).__name__}"
+            print(error_completo)
+            print("📋 TRACEBACK COMPLETO:")
+            print(traceback.format_exc())
+            
             if not self.proceso_cancelado:
                 progreso_actual.update({
                     'estado': 'error',
                     'mensaje': f"💥 Error: {str(e)}",
                     'porcentaje': 0
                 })
-                print(f"ERROR GENERAL: {e}")
         finally:
             try:
                 if self.driver:
                     self.driver.quit()
                     print("🔒 Navegador cerrado")
-            except:
-                pass
+            except Exception as e:
+                print(f"⚠️ Error cerrando navegador: {e}")
 
     def guardar_resultados_en_excel(self):
         try:
@@ -848,13 +922,13 @@ HTML_TEMPLATE = '''
     <div class="container">
         <div class="header">
             <h1>🚗 SIMIT Scraper DEFINITIVO</h1>
-            <p>Sistema que LLEGA A SIMIT SÍ O SÍ - Mi Amo</p>
+            <p>Sistema con logs detallados para debugging</p>
         </div>
         
         <div class="content">
             <div class="banner">
-                <h4>🎯 Versión DEFINITIVA</h4>
-                <p>✅ Llega a SIMIT garantizado | ✅ Múltiples URLs | ✅ Detección robusta | ✅ Capturas reales</p>
+                <h4>🎯 Versión con Debugging Completo</h4>
+                <p>✅ Logs detallados | ✅ Detección de errores | ✅ Múltiples URLs</p>
             </div>
             
             <div class="input-group">
@@ -868,7 +942,7 @@ DEF456</textarea>
             </div>
             
             <button id="iniciarBtn" class="btn" onclick="iniciarProceso()">
-                🚀 Iniciar Búsqueda DEFINITIVA
+                🚀 Iniciar Búsqueda
             </button>
             
             <div id="progressContainer" class="progress-container">
@@ -896,10 +970,10 @@ DEF456</textarea>
             </div>
             
             <div id="resultsContainer" class="results-container">
-                <h3>🎉 ¡Proceso Completado Mi Amo!</h3>
-                <p>El reporte Excel ha sido generado con capturas REALES de SIMIT.</p>
+                <h3>🎉 ¡Proceso Completado!</h3>
+                <p>El reporte Excel ha sido generado exitosamente.</p>
                 <button id="downloadBtn" class="btn download-btn" onclick="descargarExcel()">
-                    📥 Descargar Reporte Excel DEFINITIVO
+                    📥 Descargar Reporte Excel
                 </button>
             </div>
         </div>
@@ -913,7 +987,7 @@ DEF456</textarea>
             const placasTexto = document.getElementById('placas').value.trim();
             
             if (!placasTexto) {
-                alert('Por favor, ingrese al menos una placa mi amo.');
+                alert('Por favor, ingrese al menos una placa.');
                 return;
             }
             
@@ -924,7 +998,7 @@ DEF456</textarea>
                 return;
             }
             
-            if (!confirm(`¿Iniciar búsqueda DEFINITIVA para ${placasArray.length} placa(s)?`)) {
+            if (!confirm(`¿Iniciar búsqueda para ${placasArray.length} placa(s)?`)) {
                 return;
             }
             
@@ -932,7 +1006,7 @@ DEF456</textarea>
             
             const btn = document.getElementById('iniciarBtn');
             btn.disabled = true;
-            btn.textContent = '🚀 Llegando a SIMIT...';
+            btn.textContent = '🚀 Iniciando...';
             
             document.getElementById('progressContainer').style.display = 'block';
             document.getElementById('resultsContainer').style.display = 'none';
@@ -1015,7 +1089,7 @@ DEF456</textarea>
         function resetearUI() {
             const btn = document.getElementById('iniciarBtn');
             btn.disabled = false;
-            btn.textContent = '🚀 Iniciar Búsqueda DEFINITIVA';
+            btn.textContent = '🚀 Iniciar Búsqueda';
         }
         
         function descargarExcel() {
@@ -1041,13 +1115,13 @@ DEF456</textarea>
                 window.URL.revokeObjectURL(url);
                 
                 btn.disabled = false;
-                btn.textContent = '📥 Descargar Reporte Excel DEFINITIVO';
+                btn.textContent = '📥 Descargar Reporte Excel';
                 
-                alert('¡Archivo descargado exitosamente mi amo!');
+                alert('¡Archivo descargado exitosamente!');
             })
             .catch(error => {
                 btn.disabled = false;
-                btn.textContent = '📥 Descargar Reporte Excel DEFINITIVO';
+                btn.textContent = '📥 Descargar Reporte Excel';
                 alert('Error al descargar: ' + error.message);
             });
         }
